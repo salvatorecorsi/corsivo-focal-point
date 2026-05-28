@@ -1,0 +1,62 @@
+.fp-picker__image-wrap {
+	position: relative;
+	cursor: crosshair;
+	border: 1px solid #ddd;
+	border-radius: 3px;
+	overflow: hidden;
+	line-height: 0;
+	touch-action: none;
+}
+
+.fp-picker__image-wrap:active {
+	cursor: crosshair;
+}
+
+.fp-picker__image {
+	width: 100%;
+	height: auto;
+	display: block;
+	pointer-events: none;
+	user-select: none;
+}
+
+.fp-picker__dot {
+	position: absolute;
+	width: 20px;
+	height: 20px;
+	border: 2px solid #fff;
+	border-radius: 50%;
+	background: rgba(0, 120, 247, 0.6);
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.25);
+	transform: translate(-50%, -50%);
+	pointer-events: auto;
+	cursor: grab;
+}
+
+.fp-picker__dot::before,
+.fp-picker__dot::after {
+	content: '';
+	position: absolute;
+	background: rgba(255, 255, 255, 0.5);
+}
+
+.fp-picker__dot::before {
+	width: 1px;
+	height: 200vh;
+	left: 50%;
+	top: -100vh;
+}
+
+.fp-picker__dot::after {
+	height: 1px;
+	width: 200vw;
+	top: 50%;
+	left: -100vw;
+}
+
+.fp-picker__coords {
+	margin: 0.5rem 0 0.25rem;
+	font-family: monospace;
+	font-size: 12px;
+	color: #666;
+}
