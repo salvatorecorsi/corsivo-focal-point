@@ -2,6 +2,8 @@
 
 Seleziona un punto di fuoco per le immagini in evidenza direttamente dall'editor di Gutenberg. Il punto scelto viene iniettato come `object-position` nel rendering frontend, così l'inquadratura resta corretta anche quando l'immagine viene ritagliata da un `object-fit: cover`.
 
+![Martino with Focal Point](https://www.salvatorecorsi.com/wp-content/uploads/2026/05/capture-20260529-082113.gif)
+
 ## Come funziona
 
 Il plugin aggiunge un pannello **Focal Point** nella sidebar del documento (visibile solo dove c'è un'immagine in evidenza). Cliccando o trascinando sul preview si posiziona il punto di fuoco; le coordinate vengono salvate come post meta in percentuale (`0–100`).
