@@ -1,3 +1,6 @@
+= 1.0.3 — 07/07/2026 =
+* File principale rinominato da plugin.php a corsivo-focal-point.php (uniformazione della flotta). Con Corsivo Updater 1.0.4+ l'aggiornamento dalla pagina Aggiornamenti riattiva il plugin da solo; con versioni precedenti, dopo l'update va riattivato a mano.
+
 = 1.0.2 — 07/07/2026 =
 * Il plugin entra nella famiglia Corsivo: rinominato da focal-point a corsivo-focal-point. Slug, blocchi e text domain aggiornati; dati e impostazioni invariati.
 
