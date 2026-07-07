@@ -1,16 +1,17 @@
 <?php
 /**
- * Plugin Name: Focal Point
+ * Plugin Name: Corsivo Focal Point
  * Description: Seleziona un punto di fuoco per le immagini in evidenza — inietta object-position nel rendering della featured image, con utility per il background-position nei template.
- * Version: 1.0.0
+ * Version: 1.0.1
+ * Requires at least: 6.5
  * Author: Salvatore Corsi
- * Text Domain: focal-point
- * Requires PHP: 8.0
+ * Text Domain: corsivo-focal-point
+ * Requires PHP: 8.1
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'FP_VERSION', '1.0.0' );
+define( 'FP_VERSION', '1.0.1' );
 define( 'FP_URL', plugin_dir_url( __FILE__ ) );
 define( 'FP_PATH', plugin_dir_path( __FILE__ ) );
 
