@@ -1,3 +1,6 @@
+= 1.1.1 — 07/07/2026 =
+* Canale aggiornamenti su plugins.corsivo.dev.
+
 = 1.1.0 — 07/07/2026 =
 * Rename interno completo nel namespace Corsivo: prefissi di funzioni e hook, option, tabelle, meta, REST. La persistenza esistente viene convertita dal drop-in corsivo-legacy-migration (fornito con l'aggiornamento delle demo; per siti esistenti installarlo prima di aggiornare).
 
