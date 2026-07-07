@@ -46,7 +46,7 @@ WordPress 6.5+ · PHP 8.1+ · standalone.
 
 ## Aggiornamenti
 
-Distribuito dal canale privato `plugins.salvatorecorsi.dev` tramite **Corsivo Updater**.
+Distribuito dal canale privato `plugins.corsivo.dev` tramite **Corsivo Updater**.
 
 ## Licenza
 
