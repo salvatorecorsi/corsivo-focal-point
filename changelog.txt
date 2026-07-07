@@ -1,3 +1,6 @@
+= 1.0.2 — 07/07/2026 =
+* Il plugin entra nella famiglia Corsivo: rinominato da focal-point a corsivo-focal-point. Slug, blocchi e text domain aggiornati; dati e impostazioni invariati.
+
 = 1.0.1 — 07/07/2026 =
 * Collegamento al canale di aggiornamento plugins.salvatorecorsi.dev, header uniformati (Requires at least / Requires PHP).
 
