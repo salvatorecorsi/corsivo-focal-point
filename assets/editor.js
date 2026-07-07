@@ -27,8 +27,8 @@
 		const dotRef = useRef( null );
 		const dragging = useRef( false );
 
-		const x = meta._focal_point_x != null ? meta._focal_point_x : 50;
-		const y = meta._focal_point_y != null ? meta._focal_point_y : 50;
+		const x = meta._corsivo_focal_point_x != null ? meta._corsivo_focal_point_x : 50;
+		const y = meta._corsivo_focal_point_y != null ? meta._corsivo_focal_point_y : 50;
 
 		// Move dot visually without waiting for React re-render
 		const moveDot = useCallback( ( px, py ) => {
@@ -39,7 +39,7 @@
 		}, [] );
 
 		const commitPosition = useCallback( ( px, py ) => {
-			editPost( { meta: { _focal_point_x: px, _focal_point_y: py } } );
+			editPost( { meta: { _corsivo_focal_point_x: px, _corsivo_focal_point_y: py } } );
 		}, [ editPost ] );
 
 		const handlePointerDown = useCallback( ( e ) => {

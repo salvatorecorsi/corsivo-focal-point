@@ -1,3 +1,6 @@
+= 1.1.0 — 07/07/2026 =
+* Rename interno completo nel namespace Corsivo: prefissi di funzioni e hook, option, tabelle, meta, REST. La persistenza esistente viene convertita dal drop-in corsivo-legacy-migration (fornito con l'aggiornamento delle demo; per siti esistenti installarlo prima di aggiornare).
+
 = 1.0.3 — 07/07/2026 =
 * File principale rinominato da plugin.php a corsivo-focal-point.php (uniformazione della flotta). Con Corsivo Updater 1.0.4+ l'aggiornamento dalla pagina Aggiornamenti riattiva il plugin da solo; con versioni precedenti, dopo l'update va riattivato a mano.
 

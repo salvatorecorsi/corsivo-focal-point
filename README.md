@@ -17,7 +17,7 @@ Nel frontend il filtro su `post_thumbnail_html` inietta `object-position` nell'`
 Di default: `post`, `project`, `experiment`. Per aggiungerne altri:
 
 ```php
-add_filter( 'focal_point_post_types', fn( $types ) => [ ...$types, 'product' ] );
+add_filter( 'corsivo_focal_point_post_types', fn( $types ) => [ ...$types, 'product' ] );
 ```
 
 ## Uso nei template
@@ -25,8 +25,8 @@ add_filter( 'focal_point_post_types', fn( $types ) => [ ...$types, 'product' ] )
 Per applicare il focal point altrove — ad esempio come `background-position`:
 
 ```php
-$pos = fp_get_position( $post_id );          // "30% 70%"
-$coords = fp_get_position_array( $post_id ); // [ 'x' => 30, 'y' => 70 ]
+$pos = corsivo_focal_point_get_position( $post_id );          // "30% 70%"
+$coords = corsivo_focal_point_get_position_array( $post_id ); // [ 'x' => 30, 'y' => 70 ]
 ```
 
 Entrambe ricadono sul post corrente se `$post_id` è omesso, e sul centro se il punto non è impostato.
@@ -35,8 +35,8 @@ Entrambe ricadono sul post corrente se `$post_id` è omesso, e sul centro se il 
 
 | Chiave | Tipo | Default |
 |---|---|---|
-| `_focal_point_x` | number | `50` |
-| `_focal_point_y` | number | `50` |
+| `_corsivo_focal_point_x` | number | `50` |
+| `_corsivo_focal_point_y` | number | `50` |
 
 Esposti in REST (`show_in_rest`), scrivibili da chi ha `edit_posts`.
 
