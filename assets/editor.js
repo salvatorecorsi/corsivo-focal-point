@@ -1,104 +1,129 @@
-( function( wp ) {
-	const { createElement: el, useRef, useCallback } = wp.element;
+( function( wp, config ) {
+	const { createElement: el, useCallback } = wp.element;
 	const { PluginDocumentSettingPanel } = wp.editor;
-	const { useSelect, useDispatch } = wp.data;
-	const { Button } = wp.components;
+	const { useDispatch, useSelect } = wp.data;
+	const { Button, FocalPointPicker, Notice, Spinner } = wp.components;
+	const { __ } = wp.i18n;
 
-	function calcPosition( e, wrapEl ) {
-		const rect = wrapEl.getBoundingClientRect();
-		const px = Math.max( 0, Math.min( 100, Math.round( ( e.clientX - rect.left ) / rect.width * 100 ) ) );
-		const py = Math.max( 0, Math.min( 100, Math.round( ( e.clientY - rect.top ) / rect.height * 100 ) ) );
-		return { px, py };
+	function clampCoordinate( value ) {
+		const coordinate = Number( value );
+
+		if ( ! Number.isFinite( coordinate ) ) {
+			return 50;
+		}
+
+		return Math.max( 0, Math.min( 100, Math.round( coordinate ) ) );
+	}
+
+	function getPreviewUrl( media ) {
+		if ( ! media ) {
+			return '';
+		}
+
+		const sizes = media.media_details?.sizes || {};
+
+		return sizes.medium_large?.source_url || sizes.medium?.source_url || media.source_url || '';
 	}
 
 	function FocalPointPanel() {
-		const meta = useSelect( ( s ) =>
-			s( 'core/editor' ).getEditedPostAttribute( 'meta' ) || {}
-		);
-		const featuredId = useSelect( ( s ) =>
-			s( 'core/editor' ).getEditedPostAttribute( 'featured_media' )
-		);
-		const media = useSelect( ( s ) =>
-			featuredId ? s( 'core' ).getEntityRecord( 'postType', 'attachment', featuredId ) : null
-		, [ featuredId ] );
-
-		const { editPost } = useDispatch( 'core/editor' );
-		const wrapRef = useRef( null );
-		const dotRef = useRef( null );
-		const dragging = useRef( false );
-
-		const x = meta._corsivo_focal_point_x != null ? meta._corsivo_focal_point_x : 50;
-		const y = meta._corsivo_focal_point_y != null ? meta._corsivo_focal_point_y : 50;
-
-		// Move dot visually without waiting for React re-render
-		const moveDot = useCallback( ( px, py ) => {
-			if ( dotRef.current ) {
-				dotRef.current.style.left = px + '%';
-				dotRef.current.style.top = py + '%';
+		const { meta, featuredId } = useSelect( ( select ) => ( {
+			meta: select( 'core/editor' ).getEditedPostAttribute( 'meta' ) || {},
+			featuredId: select( 'core/editor' ).getEditedPostAttribute( 'featured_media' ) || 0,
+		} ), [] );
+		const { media, mediaResolutionFinished } = useSelect( ( select ) => {
+			if ( ! featuredId ) {
+				return { media: null, mediaResolutionFinished: true };
 			}
-		}, [] );
 
-		const commitPosition = useCallback( ( px, py ) => {
-			editPost( { meta: { _corsivo_focal_point_x: px, _corsivo_focal_point_y: py } } );
-		}, [ editPost ] );
+			const query = [ 'postType', 'attachment', featuredId ];
+			const core = select( 'core' );
 
-		const handlePointerDown = useCallback( ( e ) => {
-			if ( ! wrapRef.current ) return;
-			dragging.current = true;
-			wrapRef.current.setPointerCapture( e.pointerId );
-			const { px, py } = calcPosition( e, wrapRef.current );
-			moveDot( px, py );
-		}, [ moveDot ] );
+			return {
+				media: core.getEntityRecord( ...query ),
+				mediaResolutionFinished: core.hasFinishedResolution( 'getEntityRecord', query ),
+			};
+		}, [ featuredId ] );
+		const { editPost } = useDispatch( 'core/editor' );
+		const storedAttachmentId = Number( meta[ config.metaAttachment ] ) || 0;
+		const initialState = config.initialState || {};
+		const initialAttachmentId = Number( initialState.attachment_id ) || 0;
+		const sourcePosition = config.sourcePosition || {};
+		let x = 50;
+		let y = 50;
 
-		const handlePointerMove = useCallback( ( e ) => {
-			if ( ! dragging.current || ! wrapRef.current ) return;
-			const { px, py } = calcPosition( e, wrapRef.current );
-			moveDot( px, py );
-		}, [ moveDot ] );
+		if ( featuredId && storedAttachmentId === featuredId ) {
+			x = clampCoordinate( meta[ config.metaX ] );
+			y = clampCoordinate( meta[ config.metaY ] );
+		} else if ( initialState.has_position && initialAttachmentId === featuredId ) {
+			x = clampCoordinate( initialState.x );
+			y = clampCoordinate( initialState.y );
+		} else if ( ! initialState.has_position && config.sourcePosition ) {
+			x = clampCoordinate( sourcePosition.x );
+			y = clampCoordinate( sourcePosition.y );
+		}
 
-		const handlePointerUp = useCallback( ( e ) => {
-			if ( ! dragging.current || ! wrapRef.current ) return;
-			dragging.current = false;
-			const { px, py } = calcPosition( e, wrapRef.current );
-			commitPosition( px, py );
-		}, [ commitPosition ] );
+		const commitPosition = useCallback( ( point ) => {
+			editPost( {
+				meta: {
+					[ config.metaX ]: clampCoordinate( point.x * 100 ),
+					[ config.metaY ]: clampCoordinate( point.y * 100 ),
+					[ config.metaAttachment ]: featuredId,
+				},
+			} );
+		}, [ editPost, featuredId ] );
 
-		if ( ! featuredId || ! media ) {
-			return el( PluginDocumentSettingPanel, { name: 'focal-point', title: 'Focal Point', icon: 'visibility' },
-				el( 'p', { className: 'description' }, 'Imposta un\'immagine in evidenza per usare il focal point.' )
+		const panelProps = {
+			name: 'corsivo-focal-point',
+			title: __( 'Focal Point', 'corsivo-focal-point' ),
+			icon: 'visibility',
+		};
+
+		if ( ! featuredId ) {
+			return el(
+				PluginDocumentSettingPanel,
+				panelProps,
+				el( 'p', { className: 'description' }, __( 'Imposta un’immagine in evidenza per configurare il focal point.', 'corsivo-focal-point' ) )
 			);
 		}
 
-		let imgUrl = media.source_url || '';
-		if ( media.media_details?.sizes ) {
-			const sizes = media.media_details.sizes;
-			imgUrl = sizes.medium_large?.source_url || sizes.medium?.source_url || imgUrl;
+		if ( ! mediaResolutionFinished ) {
+			return el( PluginDocumentSettingPanel, panelProps, el( Spinner ) );
 		}
 
-		return el( PluginDocumentSettingPanel, { name: 'focal-point', title: 'Focal Point', icon: 'visibility' },
-			el( 'div', { className: 'fp-picker' },
-				el( 'div', {
-					className: 'fp-picker__image-wrap',
-					ref: wrapRef,
-					onPointerDown: handlePointerDown,
-					onPointerMove: handlePointerMove,
-					onPointerUp: handlePointerUp,
-				},
-					el( 'img', { src: imgUrl, className: 'fp-picker__image', draggable: false } ),
-					el( 'div', { className: 'fp-picker__dot', ref: dotRef, style: { left: x + '%', top: y + '%' } } )
-				),
-				el( 'p', { className: 'fp-picker__coords' }, `x: ${x}%  y: ${y}%` ),
+		const previewUrl = getPreviewUrl( media );
+
+		if ( ! previewUrl ) {
+			return el(
+				PluginDocumentSettingPanel,
+				panelProps,
+				el( Notice, { status: 'warning', isDismissible: false }, __( 'L’anteprima dell’immagine non è disponibile.', 'corsivo-focal-point' ) )
+			);
+		}
+
+		return el(
+			PluginDocumentSettingPanel,
+			panelProps,
+			el(
+				'div',
+				{ className: 'corsivo-focal-point-picker' },
+				el( FocalPointPicker, {
+					label: __( 'Punto focale', 'corsivo-focal-point' ),
+					url: previewUrl,
+					value: { x: x / 100, y: y / 100 },
+					onChange: commitPosition,
+				} ),
 				el( Button, {
 					variant: 'tertiary',
-					isSmall: true,
-					onClick: () => commitPosition( 50, 50 ),
-				}, 'Reset centro' )
+					size: 'small',
+					disabled: 50 === x && 50 === y,
+					onClick: () => commitPosition( { x: 0.5, y: 0.5 } ),
+				}, __( 'Reimposta al centro', 'corsivo-focal-point' ) )
 			)
 		);
 	}
 
-	wp.plugins.registerPlugin( 'focal-point-panel', {
+	wp.plugins.registerPlugin( 'corsivo-focal-point', {
 		render: FocalPointPanel,
 		icon: 'visibility',
 	} );
-} )( window.wp );
+} )( window.wp, window.corsivoFocalPointEditor );

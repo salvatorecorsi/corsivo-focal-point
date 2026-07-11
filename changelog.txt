@@ -1,3 +1,13 @@
+= 1.2.0 — 11/07/2026 =
+* Autorizzazione dei meta per singolo post, validazione intera 0–100 e supporto corretto del valore zero.
+* Coordinate associate alla featured image per evitare dati obsoleti dopo la sostituzione del media.
+* Migrazione autonoma, verificata e idempotente delle chiavi precedenti, con batch WP-Cron, lock concorrente e retry senza dipendenze dalla suite.
+* Picker WordPress nativo e accessibile da tastiera; editor classico sincronizzato col media frame e scelta editor rispettata per singolo post.
+* Rendering HTML tramite WP_HTML_Tag_Processor, limitato al primo tag immagine.
+* Impostazioni per post type, WooCommerce classico/FSE opt-in e WPML copy-once opt-in anche per traduzioni automatiche; compatibilità Yoast senza modulo.
+* Coordinate incluse in revisioni e autosave WordPress, con protezione delle revisioni legacy; nessuna tabella log separata.
+* Cleanup opzionale cache-safe e coordinato con la migrazione, supporto multisite, Update URI proprietario e protezione Apache per dotfile e archivi.
+
 = 1.1.1 — 07/07/2026 =
 * Canale aggiornamenti su plugins.corsivo.dev.
 
