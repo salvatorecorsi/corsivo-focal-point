@@ -151,6 +151,31 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 		$assert( 100 === (int) get_post_meta( $temporary_post_id, '_focal_point_y', true ), 'Legacy values must remain available for rollback.' );
 		$assert( array( 'x' => 0, 'y' => 0 ) === corsivo_focal_point_get_position_array( $temporary_post_id ), 'A top-left focal point must remain valid.' );
 
+		$classic_migration_writes = 0;
+		$classic_output_level     = ob_get_level();
+		$classic_write_counter    = function ( $check, $post_id, $meta_key ) use ( $temporary_post_id, &$classic_migration_writes ) {
+			if ( $temporary_post_id === absint( $post_id ) && in_array( $meta_key, corsivo_focal_point_position_meta_keys(), true ) ) {
+				++$classic_migration_writes;
+			}
+
+			return $check;
+		};
+		add_filter( 'update_post_metadata', $classic_write_counter, 10, 3 );
+
+		try {
+			ob_start();
+			corsivo_focal_point_render_classic_meta_box( get_post( $temporary_post_id ) );
+			ob_end_clean();
+		} finally {
+			while ( ob_get_level() > $classic_output_level ) {
+				ob_end_clean();
+			}
+
+			remove_filter( 'update_post_metadata', $classic_write_counter, 10 );
+		}
+
+		$assert( 0 === $classic_migration_writes, 'Rendering the classic picker must not migrate an already initialized post twice.' );
+
 		update_post_meta( $temporary_post_id, '_thumbnail_id', 654 );
 		$assert( array( 'x' => 50, 'y' => 50 ) === corsivo_focal_point_get_position_array( $temporary_post_id ), 'Coordinates from another attachment must remain inactive.' );
 		update_post_meta( $temporary_post_id, '_thumbnail_id', 321 );
@@ -261,8 +286,10 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 		$assert( ! is_wp_error( $wpml_target_id ), 'A temporary WPML target must be created.' );
 
 		if ( ! is_wp_error( $wpml_target_id ) ) {
-			$wpml_target_id = absint( $wpml_target_id );
-			$wpml_settings  = function ( $value ) {
+			$wpml_target_id         = absint( $wpml_target_id );
+			$wpml_ambiguous_source  = false;
+			$wpml_failure_events    = array();
+			$wpml_settings          = function ( $value ) {
 				return array(
 					'post_types'             => array( 'post' ),
 					'woocommerce_enabled'    => false,
@@ -276,15 +303,26 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 			$wpml_trid = function ( $trid, $post_id ) use ( $temporary_post_id, $wpml_target_id ) {
 				return in_array( absint( $post_id ), array( $temporary_post_id, $wpml_target_id ), true ) ? 987 : $trid;
 			};
-			$wpml_translations = function ( $translations, $trid ) use ( $temporary_post_id, $wpml_target_id ) {
+			$wpml_translations = function ( $translations, $trid ) use ( $temporary_post_id, $wpml_target_id, &$wpml_ambiguous_source ) {
 				if ( 987 !== (int) $trid ) {
 					return $translations;
 				}
 
-				return array(
+				$translation_group = array(
 					'en' => (object) array( 'element_id' => $temporary_post_id, 'original' => true ),
 					'it' => (object) array( 'element_id' => $wpml_target_id, 'original' => false ),
 				);
+
+				if ( $wpml_ambiguous_source ) {
+					$translation_group['fr'] = (object) array( 'element_id' => $temporary_post_id + 1, 'original' => true );
+				}
+
+				return $translation_group;
+			};
+			$wpml_failure_listener = function ( $event, $context ) use ( $wpml_target_id, &$wpml_failure_events ) {
+				if ( $wpml_target_id === ( $context['post_id'] ?? 0 ) ) {
+					$wpml_failure_events[] = $event;
+				}
 			};
 
 			corsivo_focal_point_update_position( $temporary_post_id, 25, 75, 321 );
@@ -293,6 +331,7 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 			add_filter( 'wpml_element_type', $wpml_element_type );
 			add_filter( 'wpml_element_trid', $wpml_trid, 10, 3 );
 			add_filter( 'wpml_get_element_translations', $wpml_translations, 10, 3 );
+			add_action( 'corsivo_focal_point_failure', $wpml_failure_listener, 10, 2 );
 
 			try {
 				corsivo_focal_point_maybe_copy_wpml_position_after_automatic_translation( $wpml_target_id );
@@ -302,11 +341,42 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				corsivo_focal_point_update_position( $temporary_post_id, 90, 10, 321 );
 				$assert( false === corsivo_focal_point_maybe_copy_wpml_position( $wpml_target_id, false ), 'WPML copy-once must not overwrite an initialized translation.' );
 				$assert( 25 === corsivo_focal_point_get_stored_state( $wpml_target_id )['x'], 'WPML translations must remain independent after initialization.' );
+
+				foreach ( corsivo_focal_point_position_meta_keys() as $meta_key ) {
+					delete_post_meta( $wpml_target_id, $meta_key );
+				}
+
+				$blocked_wpml_write = function ( $check, $post_id, $meta_key ) use ( $wpml_target_id ) {
+					return $wpml_target_id === absint( $post_id ) && CORSIVO_FOCAL_POINT_META_Y === $meta_key ? false : $check;
+				};
+				add_filter( 'update_post_metadata', $blocked_wpml_write, 10, 3 );
+
+				try {
+					$assert( false === corsivo_focal_point_maybe_copy_wpml_position( $wpml_target_id, false ), 'A failed WPML copy must report failure.' );
+				} finally {
+					remove_filter( 'update_post_metadata', $blocked_wpml_write, 10 );
+				}
+
+				$assert( in_array( 'wpml_copy_failed', $wpml_failure_events, true ), 'A failed WPML copy must emit diagnostic context.' );
+				$assert(
+					! metadata_exists( 'post', $wpml_target_id, CORSIVO_FOCAL_POINT_META_X )
+					&& ! metadata_exists( 'post', $wpml_target_id, CORSIVO_FOCAL_POINT_META_Y )
+					&& ! metadata_exists( 'post', $wpml_target_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT ),
+					'A failed WPML copy must roll back every attempted metadata write.'
+				);
+				$assert( corsivo_focal_point_maybe_copy_wpml_position( $wpml_target_id, false ), 'A failed WPML copy must remain retryable.' );
+
+				$wpml_ambiguous_source = true;
+				$ambiguous_source      = corsivo_focal_point_get_wpml_source_state( $wpml_target_id );
+				$wpml_ambiguous_source = false;
+				$assert( null === $ambiguous_source, 'WPML groups with multiple originals must not select an arbitrary source.' );
+				$assert( in_array( 'wpml_ambiguous_source', $wpml_failure_events, true ), 'Ambiguous WPML sources must emit diagnostic context.' );
 			} finally {
 				remove_filter( 'pre_option_' . CORSIVO_FOCAL_POINT_SETTINGS_OPTION, $wpml_settings );
 				remove_filter( 'wpml_element_type', $wpml_element_type );
 				remove_filter( 'wpml_element_trid', $wpml_trid, 10 );
 				remove_filter( 'wpml_get_element_translations', $wpml_translations, 10 );
+				remove_action( 'corsivo_focal_point_failure', $wpml_failure_listener, 10 );
 				wp_delete_post( $wpml_target_id, true );
 			}
 		}
@@ -359,6 +429,31 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				$assert( ! corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'Revisions with duplicate focal point meta must be rejected.' );
 				delete_metadata( 'post', $first_revision_id, CORSIVO_FOCAL_POINT_META_X, 99 );
 				$assert( corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'Removing duplicate revision meta must restore checksum compatibility.' );
+
+				delete_metadata( 'post', $first_revision_id, CORSIVO_FOCAL_POINT_REVISION_MARKER );
+				$marker_failures     = array();
+				$blocked_marker_write = function ( $check, $post_id, $meta_key ) use ( $first_revision_id ) {
+					return $first_revision_id === absint( $post_id ) && CORSIVO_FOCAL_POINT_REVISION_MARKER === $meta_key ? false : $check;
+				};
+				$marker_failure_listener = function ( $event, $context ) use ( $first_revision_id, &$marker_failures ) {
+					if ( 'revision_marker_write_failed' === $event && $first_revision_id === ( $context['revision_id'] ?? 0 ) ) {
+						$marker_failures[] = $context;
+					}
+				};
+				add_filter( 'update_post_metadata', $blocked_marker_write, 10, 3 );
+				add_action( 'corsivo_focal_point_failure', $marker_failure_listener, 10, 2 );
+
+				try {
+					corsivo_focal_point_mark_revision( $first_revision_id, $temporary_post_id );
+				} finally {
+					remove_filter( 'update_post_metadata', $blocked_marker_write, 10 );
+					remove_action( 'corsivo_focal_point_failure', $marker_failure_listener, 10 );
+				}
+
+				$assert( 1 === count( $marker_failures ), 'A failed revision marker write must emit diagnostic context.' );
+				$assert( ! corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'A failed marker write must leave the revision incompatible.' );
+				corsivo_focal_point_mark_revision( $first_revision_id, $temporary_post_id );
+				$assert( corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'A failed marker write must remain retryable.' );
 			}
 
 			corsivo_focal_point_write_single_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_X, 70 );
@@ -382,6 +477,34 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				wp_restore_post_revision( $first_revision_id );
 				$restored_state = corsivo_focal_point_get_stored_state( $temporary_post_id );
 				$assert( 10 === $restored_state['x'] && 20 === $restored_state['y'] && 321 === $restored_state['attachment_id'], 'Revision restore must restore all focal point meta.' );
+
+				corsivo_focal_point_update_position( $temporary_post_id, 70, 80, 321 );
+				$event_count             = count( $events );
+				$native_restore_failures = array();
+				$blocked_native_restore  = function ( $check, $post_id, $meta_key ) use ( $temporary_post_id ) {
+					return $temporary_post_id === absint( $post_id ) && CORSIVO_FOCAL_POINT_META_Y === $meta_key ? false : $check;
+				};
+				$native_restore_listener = function ( $event, $context ) use ( $temporary_post_id, &$native_restore_failures ) {
+					if ( 'revision_restore_failed' === $event && $temporary_post_id === ( $context['post_id'] ?? 0 ) ) {
+						$native_restore_failures[] = $context;
+					}
+				};
+				add_filter( 'add_post_metadata', $blocked_native_restore, 10, 3 );
+				add_action( 'corsivo_focal_point_failure', $native_restore_listener, 10, 2 );
+
+				try {
+					wp_restore_post_revision( $first_revision_id );
+				} finally {
+					remove_filter( 'add_post_metadata', $blocked_native_restore, 10 );
+					remove_action( 'corsivo_focal_point_failure', $native_restore_listener, 10 );
+				}
+
+				$native_restore_failure = reset( $native_restore_failures );
+				$assert( 1 === count( $native_restore_failures ), 'A failed native revision restore must emit one diagnostic event.' );
+				$assert( 'native' === ( $native_restore_failure['mode'] ?? '' ), 'A failed native revision restore must identify its restore mode.' );
+				$assert( in_array( CORSIVO_FOCAL_POINT_META_Y, $native_restore_failure['failed_meta_keys'] ?? array(), true ), 'A failed native revision restore must identify the unrestored metadata.' );
+				$assert( $event_count === count( $events ), 'A failed native revision restore must not emit a successful position update event.' );
+				delete_transient( 'corsivo_focal_point_save_notice_' . get_current_user_id() );
 			}
 
 			if ( $second_revision_id ) {
@@ -407,6 +530,44 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				wp_restore_post_revision( $second_revision_id );
 				$preserved_state = corsivo_focal_point_get_stored_state( $temporary_post_id );
 				$assert( 33 === $preserved_state['x'] && 44 === $preserved_state['y'], 'Pre-support revisions must preserve the current focal point.' );
+
+				$event_count              = count( $events );
+				$revision_restore_failures = array();
+				$blocked_revision_restore  = function ( $check, $post_id, $meta_key, $meta_value ) use ( $temporary_post_id ) {
+					return $temporary_post_id === absint( $post_id )
+						&& CORSIVO_FOCAL_POINT_META_X === $meta_key
+						&& 33 === (int) $meta_value
+						? false
+						: $check;
+				};
+				$revision_restore_listener = function ( $event, $context ) use ( $temporary_post_id, &$revision_restore_failures ) {
+					if ( 'revision_restore_failed' === $event && $temporary_post_id === ( $context['post_id'] ?? 0 ) ) {
+						$revision_restore_failures[] = $context;
+					}
+				};
+				add_filter( 'update_post_metadata', $blocked_revision_restore, 10, 4 );
+				add_action( 'corsivo_focal_point_failure', $revision_restore_listener, 10, 2 );
+
+				try {
+					wp_restore_post_revision( $second_revision_id );
+				} finally {
+					remove_filter( 'update_post_metadata', $blocked_revision_restore, 10 );
+					remove_action( 'corsivo_focal_point_failure', $revision_restore_listener, 10 );
+				}
+
+				$revision_restore_failure = reset( $revision_restore_failures );
+				$assert( 1 === count( $revision_restore_failures ), 'A failed revision preserve must emit one diagnostic event.' );
+				$assert( 'preserve' === ( $revision_restore_failure['mode'] ?? '' ), 'A failed revision preserve must identify its restore mode.' );
+				$assert( in_array( CORSIVO_FOCAL_POINT_META_X, $revision_restore_failure['failed_meta_keys'] ?? array(), true ), 'A failed revision preserve must identify the unrestored metadata.' );
+				$assert( $event_count === count( $events ), 'A failed revision preserve must not emit a successful position update event.' );
+
+				$revision_notice_key = 'corsivo_focal_point_save_notice_' . get_current_user_id();
+
+				if ( get_current_user_id() ) {
+					$assert( 'revision_restore_failed' === get_transient( $revision_notice_key ), 'A failed revision restore must notify the current user.' );
+				}
+
+				delete_transient( $revision_notice_key );
 			}
 		}
 	} finally {
@@ -609,6 +770,48 @@ try {
 				wp_restore_post_revision( $autosave_revision->ID );
 				$restored_state = corsivo_focal_point_get_stored_state( $autosave_post_id );
 				$assert( 27 === $restored_state['x'] && 73 === $restored_state['y'], 'Autosave-only revisions must restore focal point metadata manually.' );
+
+				corsivo_focal_point_update_position( $autosave_post_id, 18, 82, 0 );
+				$manual_restore_failures = array();
+				$manual_restore_events   = 0;
+				$blocked_manual_restore  = function ( $check, $post_id, $meta_key, $meta_value ) use ( $autosave_post_id ) {
+					return $autosave_post_id === absint( $post_id )
+						&& CORSIVO_FOCAL_POINT_META_Y === $meta_key
+						&& 73 === (int) $meta_value
+						? false
+						: $check;
+				};
+				$manual_restore_failure_listener = function ( $event, $context ) use ( $autosave_post_id, &$manual_restore_failures ) {
+					if ( 'revision_restore_failed' === $event && $autosave_post_id === ( $context['post_id'] ?? 0 ) ) {
+						$manual_restore_failures[] = $context;
+					}
+				};
+				$manual_restore_event_listener = function ( $post_id ) use ( $autosave_post_id, &$manual_restore_events ) {
+					if ( $autosave_post_id === $post_id ) {
+						++$manual_restore_events;
+					}
+				};
+				add_filter( 'update_post_metadata', $blocked_manual_restore, 10, 4 );
+				add_action( 'corsivo_focal_point_failure', $manual_restore_failure_listener, 10, 2 );
+				add_action( 'corsivo_focal_point_position_updated', $manual_restore_event_listener, 10 );
+
+				try {
+					wp_restore_post_revision( $autosave_revision->ID );
+				} finally {
+					remove_filter( 'update_post_metadata', $blocked_manual_restore, 10 );
+					remove_action( 'corsivo_focal_point_failure', $manual_restore_failure_listener, 10 );
+					remove_action( 'corsivo_focal_point_position_updated', $manual_restore_event_listener, 10 );
+				}
+
+				$manual_restore_failure = reset( $manual_restore_failures );
+				$manual_state           = corsivo_focal_point_get_stored_state( $autosave_post_id );
+				$assert( 1 === count( $manual_restore_failures ), 'A failed manual revision restore must emit one diagnostic event.' );
+				$assert( 'manual' === ( $manual_restore_failure['mode'] ?? '' ), 'A failed manual revision restore must identify its restore mode.' );
+				$assert( in_array( CORSIVO_FOCAL_POINT_META_Y, $manual_restore_failure['failed_meta_keys'] ?? array(), true ), 'A failed manual revision restore must identify the unrestored metadata.' );
+				$assert( 0 === $manual_restore_events, 'A failed manual revision restore must not emit a successful position update event.' );
+				$assert( 18 === $manual_state['x'] && 82 === $manual_state['y'], 'A failed manual revision restore must preserve the published focal point.' );
+				$assert( 'revision_restore_failed' === get_transient( 'corsivo_focal_point_save_notice_' . $administrator_id ), 'A failed manual revision restore must notify the current user.' );
+				delete_transient( 'corsivo_focal_point_save_notice_' . $administrator_id );
 			}
 		} finally {
 			wp_set_current_user( $previous_user_id );
@@ -660,6 +863,40 @@ if ( ! is_wp_error( $migration_test_post_id ) ) {
 		$rollback_state = corsivo_focal_point_get_stored_state( $migration_test_post_id );
 		$assert( 15 === $rollback_state['x'] && 35 === $rollback_state['y'], 'A blocked position update must preserve the original metadata.' );
 		remove_filter( 'update_post_metadata', $blocked_meta_write, 10 );
+
+		$rollback_failures = array();
+		$blocked_rollback  = function ( $check, $post_id, $meta_key, $meta_value ) use ( $migration_test_post_id ) {
+			if ( $migration_test_post_id !== absint( $post_id ) ) {
+				return $check;
+			}
+
+			if ( CORSIVO_FOCAL_POINT_META_Y === $meta_key && 75 === (int) $meta_value ) {
+				return false;
+			}
+
+			return CORSIVO_FOCAL_POINT_META_X === $meta_key && 15 === (int) $meta_value ? false : $check;
+		};
+		$rollback_failure_listener = function ( $event, $context ) use ( $migration_test_post_id, &$rollback_failures ) {
+			if ( 'position_update_failed' === $event && $migration_test_post_id === ( $context['post_id'] ?? 0 ) ) {
+				$rollback_failures[] = $context;
+			}
+		};
+		add_filter( 'update_post_metadata', $blocked_rollback, 10, 4 );
+		add_action( 'corsivo_focal_point_failure', $rollback_failure_listener, 10, 2 );
+
+		try {
+			$assert( false === corsivo_focal_point_update_position( $migration_test_post_id, 25, 75, 0 ), 'A failed rollback must report the position update as failed.' );
+		} finally {
+			remove_filter( 'update_post_metadata', $blocked_rollback, 10 );
+			remove_action( 'corsivo_focal_point_failure', $rollback_failure_listener, 10 );
+		}
+
+		$rollback_failure = reset( $rollback_failures );
+		$assert( 1 === count( $rollback_failures ), 'A failed rollback must emit one diagnostic event.' );
+		$assert( CORSIVO_FOCAL_POINT_META_Y === ( $rollback_failure['failed_meta_key'] ?? '' ), 'A failed rollback must identify the forward write that failed.' );
+		$assert( false === ( $rollback_failure['rollback_succeeded'] ?? true ), 'A partial rollback must be distinguishable from a complete rollback.' );
+		$assert( array( CORSIVO_FOCAL_POINT_META_X ) === ( $rollback_failure['rollback_failed_meta_keys'] ?? array() ), 'A failed rollback must identify the unrestored metadata.' );
+
 		delete_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X );
 		delete_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_Y );
 		delete_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT );
@@ -670,6 +907,35 @@ if ( ! is_wp_error( $migration_test_post_id ) ) {
 		remove_filter( 'update_post_metadata', $blocked_meta_write, 10 );
 		$assert( true === corsivo_focal_point_migrate_post( $migration_test_post_id ), 'Migration must succeed when the metadata write can be retried.' );
 		$assert( 25 === (int) get_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X, true ), 'A retried migration must preserve the original coordinate.' );
+
+		foreach ( corsivo_focal_point_position_meta_keys() as $meta_key ) {
+			delete_post_meta( $migration_test_post_id, $meta_key );
+		}
+
+		$fail_next_legacy_write = true;
+		$blocked_legacy_once    = function ( $check, $post_id, $meta_key ) use ( $migration_test_post_id, &$fail_next_legacy_write ) {
+			if ( $fail_next_legacy_write && $migration_test_post_id === absint( $post_id ) && CORSIVO_FOCAL_POINT_META_X === $meta_key ) {
+				$fail_next_legacy_write = false;
+				return false;
+			}
+
+			return $check;
+		};
+		add_filter( 'update_post_metadata', $blocked_legacy_once, 10, 3 );
+
+		try {
+			$assert( false === corsivo_focal_point_migrate_post( $migration_test_post_id ), 'A transient legacy write failure must stop the migration.' );
+			$assert( ! metadata_exists( 'post', $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X ), 'A transient legacy write failure must not be replaced with the coordinate default.' );
+		} finally {
+			remove_filter( 'update_post_metadata', $blocked_legacy_once, 10 );
+		}
+
+		$assert( corsivo_focal_point_migrate_post( $migration_test_post_id ), 'A transient legacy write failure must remain retryable.' );
+		$assert(
+			25 === (int) get_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X, true )
+			&& 75 === (int) get_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_Y, true ),
+			'A retried legacy migration must preserve both original coordinates.'
+		);
 	} finally {
 		remove_filter( 'update_post_metadata', $blocked_meta_write, 10 );
 		wp_delete_post( $migration_test_post_id, true );

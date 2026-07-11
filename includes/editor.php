@@ -87,7 +87,6 @@ add_action( 'add_meta_boxes', 'corsivo_focal_point_add_classic_meta_boxes', 10, 
 
 function corsivo_focal_point_render_classic_meta_box( $post ) {
 	wp_nonce_field( 'corsivo_focal_point_save', 'corsivo_focal_point_nonce' );
-	corsivo_focal_point_migrate_post( $post->ID );
 
 	$attachment_id = get_post_thumbnail_id( $post );
 	$state         = corsivo_focal_point_get_state( $post->ID );
@@ -207,9 +206,12 @@ function corsivo_focal_point_render_save_notice() {
 	}
 
 	delete_transient( $transient_key );
-	$message = 'write_failed' === $reason
-		? __( 'Il focal point non è stato salvato perché la scrittura dei metadati non è riuscita. Verifica e salva di nuovo.', 'corsivo-focal-point' )
-		: __( 'Il focal point non è stato salvato perché l’immagine in evidenza è cambiata durante la modifica. Verifica la posizione e salva di nuovo.', 'corsivo-focal-point' );
+	$messages = array(
+		'attachment_changed'      => __( 'Il focal point non è stato salvato perché l’immagine in evidenza è cambiata durante la modifica. Verifica la posizione e salva di nuovo.', 'corsivo-focal-point' ),
+		'revision_restore_failed' => __( 'Il focal point non è stato ripristinato completamente. Verifica la posizione prima di continuare.', 'corsivo-focal-point' ),
+		'write_failed'            => __( 'Il focal point non è stato salvato perché la scrittura dei metadati non è riuscita. Verifica e salva di nuovo.', 'corsivo-focal-point' ),
+	);
+	$message  = $messages[ $reason ] ?? $messages['write_failed'];
 
 	echo '<div class="notice notice-warning is-dismissible"><p>'
 		. esc_html( $message )

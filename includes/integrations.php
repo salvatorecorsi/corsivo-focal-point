@@ -109,21 +109,34 @@ function corsivo_focal_point_get_wpml_source_state( $post_id ) {
 		return null;
 	}
 
-	$target_translation = null;
-	$source_translation = null;
+	$target_translation  = null;
+	$source_translations = array();
 
 	foreach ( $translations as $translation ) {
 		$translation_id = absint( $translation->element_id ?? 0 );
 
-		if ( $translation_id === $post_id ) {
-			$target_translation = $translation;
-			continue;
+		if ( ! empty( $translation->original ) ) {
+			$source_translations[] = $translation;
 		}
 
-		if ( ! empty( $translation->original ) ) {
-			$source_translation = $translation;
+		if ( $translation_id === $post_id ) {
+			$target_translation = $translation;
 		}
 	}
+
+	if ( 1 < count( $source_translations ) ) {
+		corsivo_focal_point_log_failure(
+			'wpml_ambiguous_source',
+			array(
+				'post_id' => $post_id,
+				'trid'    => $trid,
+			)
+		);
+
+		return null;
+	}
+
+	$source_translation = 1 === count( $source_translations ) ? reset( $source_translations ) : null;
 
 	if ( ! $target_translation || ! empty( $target_translation->original ) || ! $source_translation ) {
 		return null;
@@ -172,6 +185,14 @@ function corsivo_focal_point_maybe_copy_wpml_position( $post_id, $announce = tru
 	}
 
 	if ( ! corsivo_focal_point_update_position( $post_id, $source['x'], $source['y'], $target_attachment_id ) ) {
+		corsivo_focal_point_log_failure(
+			'wpml_copy_failed',
+			array(
+				'post_id'       => $post_id,
+				'attachment_id' => $target_attachment_id,
+			)
+		);
+
 		return false;
 	}
 
