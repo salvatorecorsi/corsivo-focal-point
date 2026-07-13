@@ -31,7 +31,7 @@ I post type selezionati funzionano sia con l’editor a blocchi sia con l’edit
 
 Le coordinate sono validate anche fuori REST e sono autorizzate tramite la capability dinamica `edit_post` del singolo contenuto. Il riferimento all’attachment impedisce che il focal point di una vecchia featured image venga applicato a quella nuova.
 
-L’aggiornamento migra autonomamente e a batch le precedenti chiavi `_focal_point_x` e `_focal_point_y`, normalizza e deduplica anche i valori Corsivo già esistenti e completa il lavoro in background tramite WP-Cron. Il contenuto aperto nell’editor viene migrato subito. I dati legacy restano disponibili per rollback, ma non vengono più riletti dal runtime dopo la conclusione della migrazione.
+Ogni aggiornamento dei tre meta è coordinato: i valori singoli vengono deduplicati e, in caso di errore parziale, viene tentato e verificato il ripristino dello stato precedente.
 
 ## Rendering e API
 
@@ -44,9 +44,9 @@ $position = corsivo_focal_point_get_position( $post_id );
 $coordinates = corsivo_focal_point_get_position_array( $post_id );
 ```
 
-Il risultato è rispettivamente una stringa come `0% 75%` e un array come `[ 'x' => 0, 'y' => 75 ]`. Gli helper legacy `fp_get_position()` e `fp_get_position_array()` restano disponibili per compatibilità.
+Il risultato è rispettivamente una stringa come `0% 75%` e un array come `[ 'x' => 0, 'y' => 75 ]`.
 
-Dopo un aggiornamento viene emesso `corsivo_focal_point_position_updated` con ID del post, nuovo stato e stato precedente. I primi due argomenti restano compatibili con le integrazioni già esistenti.
+Dopo un aggiornamento viene emesso `corsivo_focal_point_position_updated` con ID del post, nuovo stato e stato precedente.
 
 ## Integrazioni opzionali
 
@@ -58,7 +58,7 @@ Yoast SEO non richiede un modulo. `object-position` è CSS e non può modificare
 
 ## Storico
 
-I meta seguono revisioni e autosave nativi sui post type che li supportano, incluso il valore `0`. Il confronto mostra coordinate e attachment; il ripristino riporta insieme i tre meta ma non modifica la featured image, che WordPress non include nelle revisioni. Se il media non coincide, la posizione restaurata resta inattiva. Le revisioni anteriori al supporto dello storico dichiarano il limite nel confronto e non cancellano lo stato corrente.
+I meta seguono revisioni e autosave nativi sui post type che li supportano, incluso il valore `0`. Il confronto mostra coordinate e attachment; il ripristino riporta insieme i tre meta ma non modifica la featured image, che WordPress non include nelle revisioni. Se il media non coincide, la posizione restaurata resta inattiva. Ogni snapshot usa un checksum di schema `1`; snapshot incompleti o alterati vengono rifiutati.
 
 Non viene creata una tabella log separata: autore, data, confronto e ripristino sono già coperti dalle revisioni, senza duplicare dati né introdurre retention aggiuntiva.
 

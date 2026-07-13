@@ -4,7 +4,5 @@
 		<custom-field action="ignore">_corsivo_focal_point_x</custom-field>
 		<custom-field action="ignore">_corsivo_focal_point_y</custom-field>
 		<custom-field action="ignore">_corsivo_focal_point_attachment_id</custom-field>
-		<custom-field action="ignore">_focal_point_x</custom-field>
-		<custom-field action="ignore">_focal_point_y</custom-field>
 	</custom-fields>
 </wpml-config>

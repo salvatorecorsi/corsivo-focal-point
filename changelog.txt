@@ -1,25 +1,10 @@
-= 1.2.0 — 11/07/2026 =
+= 1.2.0 — 13/07/2026 =
 * Autorizzazione dei meta per singolo post, validazione intera 0–100 e supporto corretto del valore zero.
 * Coordinate associate alla featured image per evitare dati obsoleti dopo la sostituzione del media.
-* Migrazione autonoma, verificata e idempotente delle chiavi precedenti, con batch WP-Cron, lock concorrente e retry senza dipendenze dalla suite.
+* Persistenza coordinata dei tre meta correnti, deduplicazione e rollback verificato in caso di errore parziale.
 * Picker WordPress nativo e accessibile da tastiera; editor classico sincronizzato col media frame e scelta editor rispettata per singolo post.
 * Rendering HTML tramite WP_HTML_Tag_Processor, limitato al primo tag immagine.
-* Impostazioni per post type, WooCommerce classico/FSE opt-in e WPML copy-once opt-in anche per traduzioni automatiche; compatibilità Yoast senza modulo.
-* Coordinate incluse in revisioni e autosave WordPress, con protezione delle revisioni legacy; nessuna tabella log separata.
-* Cleanup opzionale cache-safe e coordinato con la migrazione, supporto multisite, Update URI proprietario e protezione Apache per dotfile e archivi.
-
-= 1.1.1 — 07/07/2026 =
-* Canale aggiornamenti su plugins.corsivo.dev.
-
-= 1.1.0 — 07/07/2026 =
-* Rename interno completo nel namespace Corsivo: prefissi di funzioni e hook, option, tabelle, meta, REST. La persistenza esistente viene convertita dal drop-in corsivo-legacy-migration (fornito con l'aggiornamento delle demo; per siti esistenti installarlo prima di aggiornare).
-
-= 1.0.3 — 07/07/2026 =
-* File principale rinominato da plugin.php a corsivo-focal-point.php (uniformazione della flotta). Con Corsivo Updater 1.0.4+ l'aggiornamento dalla pagina Aggiornamenti riattiva il plugin da solo; con versioni precedenti, dopo l'update va riattivato a mano.
-
-= 1.0.2 — 07/07/2026 =
-* Il plugin entra nella famiglia Corsivo: rinominato da focal-point a corsivo-focal-point. Slug, blocchi e text domain aggiornati; dati e impostazioni invariati.
-
-= 1.0.1 — 07/07/2026 =
-* Collegamento al canale di aggiornamento plugins.salvatorecorsi.dev, header uniformati (Requires at least / Requires PHP).
+* Impostazioni per post type, WooCommerce classico/FSE e WPML copy-once opt-in anche per traduzioni automatiche; integrazione Yoast senza modulo.
+* Coordinate incluse in revisioni e autosave WordPress con checksum di schema `1`; nessuna tabella log separata.
+* Cleanup opzionale cache-safe, supporto multisite, Update URI proprietario e protezione Apache per dotfile e archivi.
 

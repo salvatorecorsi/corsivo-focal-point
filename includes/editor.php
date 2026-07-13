@@ -21,8 +21,6 @@ function corsivo_focal_point_editor_config( $post_id = 0 ) {
 		return $config;
 	}
 
-	corsivo_focal_point_migrate_post( $post_id );
-
 	$state                  = corsivo_focal_point_get_stored_state( $post_id );
 	$config['initialState'] = $state;
 
@@ -253,13 +251,6 @@ add_action( 'init', 'corsivo_focal_point_register_rest_update_hooks', 21 );
 
 function corsivo_focal_point_after_rest_update( $post, $request ) {
 	$previous_state = corsivo_focal_point_rest_previous_state( $request );
-	$meta           = $request->get_param( 'meta' );
-
-	if ( is_array( $meta )
-		&& array_intersect( array_keys( $meta ), array( CORSIVO_FOCAL_POINT_META_X, CORSIVO_FOCAL_POINT_META_Y, CORSIVO_FOCAL_POINT_META_ATTACHMENT ) )
-	) {
-		corsivo_focal_point_migrate_post( $post->ID );
-	}
 
 	corsivo_focal_point_maybe_copy_wpml_position( $post->ID, false );
 

@@ -36,7 +36,7 @@ function corsivo_focal_point_existing_data_post_types() {
 		return $post_types_by_site[ $site_id ];
 	}
 
-	$meta_keys    = array( CORSIVO_FOCAL_POINT_META_X, CORSIVO_FOCAL_POINT_META_Y, CORSIVO_FOCAL_POINT_META_ATTACHMENT, '_focal_point_x', '_focal_point_y' );
+	$meta_keys    = array( CORSIVO_FOCAL_POINT_META_X, CORSIVO_FOCAL_POINT_META_Y, CORSIVO_FOCAL_POINT_META_ATTACHMENT );
 	$placeholders = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
 	$query        = $wpdb->prepare(
 		"SELECT DISTINCT posts.post_type
@@ -319,7 +319,6 @@ add_filter( 'plugin_action_links_' . plugin_basename( CORSIVO_FOCAL_POINT_FILE )
 
 function corsivo_focal_point_activate_site() {
 	corsivo_focal_point_initialize_site();
-	corsivo_focal_point_schedule_migration();
 }
 
 function corsivo_focal_point_activate( $network_wide = false ) {

@@ -137,25 +137,23 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 
 	try {
 		update_post_meta( $temporary_post_id, '_thumbnail_id', 321 );
-		add_post_meta( $temporary_post_id, '_focal_point_x', 0 );
-		add_post_meta( $temporary_post_id, '_focal_point_y', 100 );
+		add_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_X, 0 );
 		add_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y, -20 );
 		add_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y, 80 );
+		add_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, 321 );
 
-		corsivo_focal_point_migrate_post( $temporary_post_id );
-
-		$assert( 0 === (int) get_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_X, true ), 'Legacy zero must survive migration.' );
-		$assert( 0 === (int) get_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y, true ), 'Existing Corsivo values must take precedence and clamp.' );
+		$assert( corsivo_focal_point_update_position( $temporary_post_id, 0, -20, 321 ), 'A valid focal point update must succeed.' );
+		$assert( 0 === (int) get_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_X, true ), 'A zero coordinate must remain valid.' );
+		$assert( 0 === (int) get_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y, true ), 'Coordinates must be clamped.' );
 		$assert( 1 === count( get_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y, false ) ), 'Single meta values must be deduplicated.' );
-		$assert( 321 === (int) get_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, true ), 'Migration must bind the current featured image.' );
-		$assert( 100 === (int) get_post_meta( $temporary_post_id, '_focal_point_y', true ), 'Legacy values must remain available for rollback.' );
+		$assert( 321 === (int) get_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, true ), 'The focal point must bind the current featured image.' );
 		$assert( array( 'x' => 0, 'y' => 0 ) === corsivo_focal_point_get_position_array( $temporary_post_id ), 'A top-left focal point must remain valid.' );
 
-		$classic_migration_writes = 0;
-		$classic_output_level     = ob_get_level();
-		$classic_write_counter    = function ( $check, $post_id, $meta_key ) use ( $temporary_post_id, &$classic_migration_writes ) {
+		$classic_meta_writes  = 0;
+		$classic_output_level = ob_get_level();
+		$classic_write_counter = function ( $check, $post_id, $meta_key ) use ( $temporary_post_id, &$classic_meta_writes ) {
 			if ( $temporary_post_id === absint( $post_id ) && in_array( $meta_key, corsivo_focal_point_position_meta_keys(), true ) ) {
-				++$classic_migration_writes;
+				++$classic_meta_writes;
 			}
 
 			return $check;
@@ -174,7 +172,7 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 			remove_filter( 'update_post_metadata', $classic_write_counter, 10 );
 		}
 
-		$assert( 0 === $classic_migration_writes, 'Rendering the classic picker must not migrate an already initialized post twice.' );
+		$assert( 0 === $classic_meta_writes, 'Rendering the classic picker must not mutate focal point metadata.' );
 
 		update_post_meta( $temporary_post_id, '_thumbnail_id', 654 );
 		$assert( array( 'x' => 50, 'y' => 50 ) === corsivo_focal_point_get_position_array( $temporary_post_id ), 'Coordinates from another attachment must remain inactive.' );
@@ -228,7 +226,7 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				}
 
 				$assert( 200 === $normal_rest_response->get_status(), 'Normal REST updates must persist focal point metadata.' );
-				$assert( $matching_revision_id && corsivo_focal_point_revision_is_compatible( $matching_revision_id ), 'Normal REST focal point updates must create a coherent revision.' );
+				$assert( $matching_revision_id && corsivo_focal_point_revision_is_coherent( $matching_revision_id ), 'Normal REST focal point updates must create a coherent revision.' );
 
 				$direct_autosave_request = new WP_REST_Request( 'POST', '/wp/v2/posts/' . $temporary_post_id . '/autosaves' );
 				$direct_autosave_request->set_param(
@@ -397,8 +395,8 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				corsivo_focal_point_sync_autosave( get_post( $autosave_id, ARRAY_A ), false );
 				$assert( 0 === (int) get_post_meta( $autosave_id, CORSIVO_FOCAL_POINT_META_X, true ), 'Autosaves must preserve a zero X coordinate.' );
 				$assert( 0 === (int) get_post_meta( $autosave_id, CORSIVO_FOCAL_POINT_META_Y, true ), 'Autosaves must preserve a zero Y coordinate.' );
-				$assert( metadata_exists( 'post', $autosave_id, CORSIVO_FOCAL_POINT_REVISION_MARKER ), 'Complete autosaves must carry the compatibility marker.' );
-				$assert( corsivo_focal_point_revision_is_compatible( $autosave_id ), 'Autosave compatibility markers must match their metadata snapshot.' );
+				$assert( metadata_exists( 'post', $autosave_id, CORSIVO_FOCAL_POINT_REVISION_MARKER ), 'Complete autosaves must carry the integrity marker.' );
+				$assert( corsivo_focal_point_revision_is_coherent( $autosave_id ), 'Autosave integrity markers must match their metadata snapshot.' );
 				wp_restore_post_revision( $autosave_id );
 				$assert( array( 'x' => 0, 'y' => 0 ) === corsivo_focal_point_get_position_array( $temporary_post_id ), 'Restoring an autosave must preserve zero coordinates.' );
 			}
@@ -421,14 +419,14 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 			}
 
 			$assert( 0 < $first_revision_id, 'Revision metadata must be stored.' );
-			$assert( metadata_exists( 'post', $first_revision_id, CORSIVO_FOCAL_POINT_REVISION_MARKER ), 'New revisions must carry a compatibility marker.' );
-			$assert( corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'Revision compatibility markers must match their metadata snapshot.' );
+			$assert( metadata_exists( 'post', $first_revision_id, CORSIVO_FOCAL_POINT_REVISION_MARKER ), 'New revisions must carry an integrity marker.' );
+			$assert( corsivo_focal_point_revision_is_coherent( $first_revision_id ), 'Revision integrity markers must match their metadata snapshot.' );
 
 			if ( $first_revision_id ) {
 				add_metadata( 'post', $first_revision_id, CORSIVO_FOCAL_POINT_META_X, 99 );
-				$assert( ! corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'Revisions with duplicate focal point meta must be rejected.' );
+				$assert( ! corsivo_focal_point_revision_is_coherent( $first_revision_id ), 'Revisions with duplicate focal point meta must be rejected.' );
 				delete_metadata( 'post', $first_revision_id, CORSIVO_FOCAL_POINT_META_X, 99 );
-				$assert( corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'Removing duplicate revision meta must restore checksum compatibility.' );
+				$assert( corsivo_focal_point_revision_is_coherent( $first_revision_id ), 'Removing duplicate revision meta must restore checksum coherence.' );
 
 				delete_metadata( 'post', $first_revision_id, CORSIVO_FOCAL_POINT_REVISION_MARKER );
 				$marker_failures     = array();
@@ -451,9 +449,9 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				}
 
 				$assert( 1 === count( $marker_failures ), 'A failed revision marker write must emit diagnostic context.' );
-				$assert( ! corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'A failed marker write must leave the revision incompatible.' );
+				$assert( ! corsivo_focal_point_revision_is_coherent( $first_revision_id ), 'A failed marker write must leave the revision incoherent.' );
 				corsivo_focal_point_mark_revision( $first_revision_id, $temporary_post_id );
-				$assert( corsivo_focal_point_revision_is_compatible( $first_revision_id ), 'A failed marker write must remain retryable.' );
+				$assert( corsivo_focal_point_revision_is_coherent( $first_revision_id ), 'A failed marker write must remain retryable.' );
 			}
 
 			corsivo_focal_point_write_single_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_X, 70 );
@@ -510,26 +508,15 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 			if ( $second_revision_id ) {
 				delete_metadata( 'post', $second_revision_id, CORSIVO_FOCAL_POINT_REVISION_MARKER );
 				$assert(
-					str_contains( corsivo_focal_point_get_revision_field( '', 'corsivo_focal_point_position', get_post( $second_revision_id ) ), 'non disponibile' ),
-					'Pre-support revisions must disclose that focal point history is unavailable.'
-				);
-				delete_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_X );
-				delete_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y );
-				delete_post_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT );
-				wp_restore_post_revision( $second_revision_id );
-				$assert(
-					! metadata_exists( 'post', $temporary_post_id, CORSIVO_FOCAL_POINT_META_X )
-					&& ! metadata_exists( 'post', $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y )
-					&& ! metadata_exists( 'post', $temporary_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT ),
-					'Pre-support revisions must preserve an intentionally empty current focal point.'
+					str_contains( corsivo_focal_point_get_revision_field( '', 'corsivo_focal_point_position', get_post( $second_revision_id ) ), 'non valido' ),
+					'Revisions with an invalid checksum must be identified.'
 				);
 				corsivo_focal_point_write_single_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_X, 33 );
 				corsivo_focal_point_write_single_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_Y, 44 );
 				corsivo_focal_point_write_single_meta( $temporary_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, 321 );
-				wp_update_post( array( 'ID' => $temporary_post_id, 'post_title' => 'Focal revision three' ) );
 				wp_restore_post_revision( $second_revision_id );
-				$preserved_state = corsivo_focal_point_get_stored_state( $temporary_post_id );
-				$assert( 33 === $preserved_state['x'] && 44 === $preserved_state['y'], 'Pre-support revisions must preserve the current focal point.' );
+				$rejected_state = corsivo_focal_point_get_stored_state( $temporary_post_id );
+				$assert( 33 === $rejected_state['x'] && 44 === $rejected_state['y'], 'An incoherent revision must not replace the current focal point.' );
 
 				$event_count              = count( $events );
 				$revision_restore_failures = array();
@@ -556,10 +543,10 @@ if ( ! is_wp_error( $temporary_post_id ) ) {
 				}
 
 				$revision_restore_failure = reset( $revision_restore_failures );
-				$assert( 1 === count( $revision_restore_failures ), 'A failed revision preserve must emit one diagnostic event.' );
-				$assert( 'preserve' === ( $revision_restore_failure['mode'] ?? '' ), 'A failed revision preserve must identify its restore mode.' );
-				$assert( in_array( CORSIVO_FOCAL_POINT_META_X, $revision_restore_failure['failed_meta_keys'] ?? array(), true ), 'A failed revision preserve must identify the unrestored metadata.' );
-				$assert( $event_count === count( $events ), 'A failed revision preserve must not emit a successful position update event.' );
+				$assert( 1 === count( $revision_restore_failures ), 'A failed rejected revision restore must emit one diagnostic event.' );
+				$assert( 'rejected' === ( $revision_restore_failure['mode'] ?? '' ), 'A rejected revision must identify its restore mode.' );
+				$assert( in_array( CORSIVO_FOCAL_POINT_META_X, $revision_restore_failure['failed_meta_keys'] ?? array(), true ), 'A failed rejected revision restore must identify the unrestored metadata.' );
+				$assert( $event_count === count( $events ), 'A failed rejected revision restore must not emit a successful position update event.' );
 
 				$revision_notice_key = 'corsivo_focal_point_save_notice_' . get_current_user_id();
 
@@ -621,7 +608,7 @@ if ( ! is_wp_error( $partial_autosave_post_id ) && $administrator_id ) {
 			$assert( 200 === $partial_autosave_response->get_status(), 'Partial REST autosave updates must succeed.' );
 			$assert( 35 === $partial_state['x'] && 70 === $partial_state['y'], 'Partial REST autosaves must preserve unsubmitted autosave coordinates.' );
 			$assert( 35 === ( $response_meta[ CORSIVO_FOCAL_POINT_META_X ] ?? null ) && 70 === ( $response_meta[ CORSIVO_FOCAL_POINT_META_Y ] ?? null ), 'Partial REST autosave responses must expose the complete persisted state.' );
-			$assert( corsivo_focal_point_revision_is_compatible( $partial_autosave->ID ), 'Partial REST autosaves must refresh the compatibility marker.' );
+			$assert( corsivo_focal_point_revision_is_coherent( $partial_autosave->ID ), 'Partial REST autosaves must refresh the integrity marker.' );
 		}
 	} finally {
 		wp_set_current_user( $previous_user_id );
@@ -650,7 +637,7 @@ if ( ! is_wp_error( $empty_revision_post_id ) && wp_revisions_enabled( get_post(
 		$empty_revision_id = $empty_revision instanceof WP_Post ? $empty_revision->ID : 0;
 
 		$assert( 0 < $empty_revision_id, 'An empty focal point revision must be stored.' );
-		$assert( $empty_revision_id && corsivo_focal_point_revision_is_compatible( $empty_revision_id ), 'Empty focal point revisions must carry a valid compatibility marker.' );
+		$assert( $empty_revision_id && corsivo_focal_point_revision_is_coherent( $empty_revision_id ), 'Empty focal point revisions must carry a valid integrity marker.' );
 
 		if ( $empty_revision_id ) {
 			corsivo_focal_point_update_position( $empty_revision_post_id, 40, 60, 0 );
@@ -659,7 +646,7 @@ if ( ! is_wp_error( $empty_revision_post_id ) && wp_revisions_enabled( get_post(
 				! metadata_exists( 'post', $empty_revision_post_id, CORSIVO_FOCAL_POINT_META_X )
 				&& ! metadata_exists( 'post', $empty_revision_post_id, CORSIVO_FOCAL_POINT_META_Y )
 				&& ! metadata_exists( 'post', $empty_revision_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT ),
-				'Restoring an empty compatible revision must clear the current focal point.'
+				'Restoring an empty coherent revision must clear the current focal point.'
 			);
 		}
 	} finally {
@@ -667,42 +654,6 @@ if ( ! is_wp_error( $empty_revision_post_id ) && wp_revisions_enabled( get_post(
 	}
 } elseif ( ! is_wp_error( $empty_revision_post_id ) ) {
 	wp_delete_post( $empty_revision_post_id, true );
-}
-
-$legacy_revision_post_id = wp_insert_post(
-	array(
-		'post_title'  => 'Corsivo Focal Point legacy revision',
-		'post_status' => 'draft',
-		'post_type'   => 'post',
-	),
-	true
-);
-
-if ( ! is_wp_error( $legacy_revision_post_id ) && wp_revisions_enabled( get_post( $legacy_revision_post_id ) ) ) {
-	$legacy_revision_post_id = absint( $legacy_revision_post_id );
-	$legacy_data_version     = function () {
-		return 'legacy';
-	};
-
-	try {
-		add_post_meta( $legacy_revision_post_id, '_focal_point_x', 15 );
-		add_post_meta( $legacy_revision_post_id, '_focal_point_y', 85 );
-		add_filter( 'pre_option_' . CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION, $legacy_data_version );
-		wp_update_post( array( 'ID' => $legacy_revision_post_id, 'post_title' => 'Corsivo Focal Point legacy revision saved' ) );
-		$legacy_revisions  = wp_get_post_revisions( $legacy_revision_post_id );
-		$legacy_revision   = $legacy_revisions ? reset( $legacy_revisions ) : null;
-		$legacy_revision_id = $legacy_revision instanceof WP_Post ? $legacy_revision->ID : 0;
-
-		$assert( corsivo_focal_point_get_stored_state( $legacy_revision_post_id )['has_position'], 'Legacy focal points must remain readable while migration is incomplete.' );
-		$assert( $legacy_revision_id && ! corsivo_focal_point_revision_is_compatible( $legacy_revision_id ), 'Legacy-only revisions must not be marked as empty compatible snapshots.' );
-		remove_filter( 'pre_option_' . CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION, $legacy_data_version );
-		$assert( ! corsivo_focal_point_get_stored_state( $legacy_revision_post_id )['has_position'], 'Legacy focal points must not reactivate after migration is complete.' );
-	} finally {
-		remove_filter( 'pre_option_' . CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION, $legacy_data_version );
-		wp_delete_post( $legacy_revision_post_id, true );
-	}
-} elseif ( ! is_wp_error( $legacy_revision_post_id ) ) {
-	wp_delete_post( $legacy_revision_post_id, true );
 }
 
 $autosave_post_id = wp_insert_post(
@@ -765,7 +716,7 @@ try {
 				$response_meta  = $revision_response->get_data()['meta'] ?? array();
 
 				$assert( 27 === $revision_state['x'] && 73 === $revision_state['y'], 'Autosave revisions must persist focal point metadata without revision support.' );
-				$assert( corsivo_focal_point_revision_is_compatible( $autosave_revision->ID ), 'Autosave-only revisions must carry a valid compatibility marker.' );
+				$assert( corsivo_focal_point_revision_is_coherent( $autosave_revision->ID ), 'Autosave-only revisions must carry a valid integrity marker.' );
 				$assert( 27 === ( $response_meta[ CORSIVO_FOCAL_POINT_META_X ] ?? null ) && 73 === ( $response_meta[ CORSIVO_FOCAL_POINT_META_Y ] ?? null ), 'Autosave revision responses must expose persisted focal point metadata.' );
 				wp_restore_post_revision( $autosave_revision->ID );
 				$restored_state = corsivo_focal_point_get_stored_state( $autosave_post_id );
@@ -830,43 +781,43 @@ try {
 	unregister_post_type( $autosave_post_type );
 }
 
-$migration_test_post_id = wp_insert_post(
+$update_test_post_id = wp_insert_post(
 	array(
-		'post_title'  => 'Corsivo Focal Point migration retry',
+		'post_title'  => 'Corsivo Focal Point update rollback',
 		'post_status' => 'draft',
 		'post_type'   => 'post',
 	),
 	true
 );
 
-if ( ! is_wp_error( $migration_test_post_id ) ) {
-	$migration_test_post_id = absint( $migration_test_post_id );
-	$blocked_meta_write     = function ( $check, $post_id, $meta_key ) use ( $migration_test_post_id ) {
-		return $migration_test_post_id === absint( $post_id ) && CORSIVO_FOCAL_POINT_META_X === $meta_key ? false : $check;
+if ( ! is_wp_error( $update_test_post_id ) ) {
+	$update_test_post_id = absint( $update_test_post_id );
+	$blocked_meta_write     = function ( $check, $post_id, $meta_key ) use ( $update_test_post_id ) {
+		return $update_test_post_id === absint( $post_id ) && CORSIVO_FOCAL_POINT_META_X === $meta_key ? false : $check;
 	};
 
 	try {
 		add_filter( 'update_post_metadata', $blocked_meta_write, 10, 3 );
-		$assert( false === corsivo_focal_point_update_position( $migration_test_post_id, 25, 75, 0 ), 'A blocked initial position update must report failure.' );
+		$assert( false === corsivo_focal_point_update_position( $update_test_post_id, 25, 75, 0 ), 'A blocked initial position update must report failure.' );
 		$assert(
-			! metadata_exists( 'post', $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X )
-			&& ! metadata_exists( 'post', $migration_test_post_id, CORSIVO_FOCAL_POINT_META_Y )
-			&& ! metadata_exists( 'post', $migration_test_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT ),
+			! metadata_exists( 'post', $update_test_post_id, CORSIVO_FOCAL_POINT_META_X )
+			&& ! metadata_exists( 'post', $update_test_post_id, CORSIVO_FOCAL_POINT_META_Y )
+			&& ! metadata_exists( 'post', $update_test_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT ),
 			'A blocked initial position update must preserve physical metadata absence.'
 		);
 		remove_filter( 'update_post_metadata', $blocked_meta_write, 10 );
-		corsivo_focal_point_write_single_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X, 15 );
-		corsivo_focal_point_write_single_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_Y, 35 );
-		corsivo_focal_point_write_single_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, 0 );
+		corsivo_focal_point_write_single_meta( $update_test_post_id, CORSIVO_FOCAL_POINT_META_X, 15 );
+		corsivo_focal_point_write_single_meta( $update_test_post_id, CORSIVO_FOCAL_POINT_META_Y, 35 );
+		corsivo_focal_point_write_single_meta( $update_test_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, 0 );
 		add_filter( 'update_post_metadata', $blocked_meta_write, 10, 3 );
-		$assert( false === corsivo_focal_point_update_position( $migration_test_post_id, 25, 75, 0 ), 'A blocked position update must report failure.' );
-		$rollback_state = corsivo_focal_point_get_stored_state( $migration_test_post_id );
+		$assert( false === corsivo_focal_point_update_position( $update_test_post_id, 25, 75, 0 ), 'A blocked position update must report failure.' );
+		$rollback_state = corsivo_focal_point_get_stored_state( $update_test_post_id );
 		$assert( 15 === $rollback_state['x'] && 35 === $rollback_state['y'], 'A blocked position update must preserve the original metadata.' );
 		remove_filter( 'update_post_metadata', $blocked_meta_write, 10 );
 
 		$rollback_failures = array();
-		$blocked_rollback  = function ( $check, $post_id, $meta_key, $meta_value ) use ( $migration_test_post_id ) {
-			if ( $migration_test_post_id !== absint( $post_id ) ) {
+		$blocked_rollback  = function ( $check, $post_id, $meta_key, $meta_value ) use ( $update_test_post_id ) {
+			if ( $update_test_post_id !== absint( $post_id ) ) {
 				return $check;
 			}
 
@@ -876,8 +827,8 @@ if ( ! is_wp_error( $migration_test_post_id ) ) {
 
 			return CORSIVO_FOCAL_POINT_META_X === $meta_key && 15 === (int) $meta_value ? false : $check;
 		};
-		$rollback_failure_listener = function ( $event, $context ) use ( $migration_test_post_id, &$rollback_failures ) {
-			if ( 'position_update_failed' === $event && $migration_test_post_id === ( $context['post_id'] ?? 0 ) ) {
+		$rollback_failure_listener = function ( $event, $context ) use ( $update_test_post_id, &$rollback_failures ) {
+			if ( 'position_update_failed' === $event && $update_test_post_id === ( $context['post_id'] ?? 0 ) ) {
 				$rollback_failures[] = $context;
 			}
 		};
@@ -885,7 +836,7 @@ if ( ! is_wp_error( $migration_test_post_id ) ) {
 		add_action( 'corsivo_focal_point_failure', $rollback_failure_listener, 10, 2 );
 
 		try {
-			$assert( false === corsivo_focal_point_update_position( $migration_test_post_id, 25, 75, 0 ), 'A failed rollback must report the position update as failed.' );
+			$assert( false === corsivo_focal_point_update_position( $update_test_post_id, 25, 75, 0 ), 'A failed rollback must report the position update as failed.' );
 		} finally {
 			remove_filter( 'update_post_metadata', $blocked_rollback, 10 );
 			remove_action( 'corsivo_focal_point_failure', $rollback_failure_listener, 10 );
@@ -897,119 +848,9 @@ if ( ! is_wp_error( $migration_test_post_id ) ) {
 		$assert( false === ( $rollback_failure['rollback_succeeded'] ?? true ), 'A partial rollback must be distinguishable from a complete rollback.' );
 		$assert( array( CORSIVO_FOCAL_POINT_META_X ) === ( $rollback_failure['rollback_failed_meta_keys'] ?? array() ), 'A failed rollback must identify the unrestored metadata.' );
 
-		delete_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X );
-		delete_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_Y );
-		delete_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT );
-		add_post_meta( $migration_test_post_id, '_focal_point_x', 25 );
-		add_post_meta( $migration_test_post_id, '_focal_point_y', 75 );
-		add_filter( 'update_post_metadata', $blocked_meta_write, 10, 3 );
-		$assert( false === corsivo_focal_point_migrate_post( $migration_test_post_id ), 'Migration must report a blocked metadata write.' );
-		remove_filter( 'update_post_metadata', $blocked_meta_write, 10 );
-		$assert( true === corsivo_focal_point_migrate_post( $migration_test_post_id ), 'Migration must succeed when the metadata write can be retried.' );
-		$assert( 25 === (int) get_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X, true ), 'A retried migration must preserve the original coordinate.' );
-
-		foreach ( corsivo_focal_point_position_meta_keys() as $meta_key ) {
-			delete_post_meta( $migration_test_post_id, $meta_key );
-		}
-
-		$fail_next_legacy_write = true;
-		$blocked_legacy_once    = function ( $check, $post_id, $meta_key ) use ( $migration_test_post_id, &$fail_next_legacy_write ) {
-			if ( $fail_next_legacy_write && $migration_test_post_id === absint( $post_id ) && CORSIVO_FOCAL_POINT_META_X === $meta_key ) {
-				$fail_next_legacy_write = false;
-				return false;
-			}
-
-			return $check;
-		};
-		add_filter( 'update_post_metadata', $blocked_legacy_once, 10, 3 );
-
-		try {
-			$assert( false === corsivo_focal_point_migrate_post( $migration_test_post_id ), 'A transient legacy write failure must stop the migration.' );
-			$assert( ! metadata_exists( 'post', $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X ), 'A transient legacy write failure must not be replaced with the coordinate default.' );
-		} finally {
-			remove_filter( 'update_post_metadata', $blocked_legacy_once, 10 );
-		}
-
-		$assert( corsivo_focal_point_migrate_post( $migration_test_post_id ), 'A transient legacy write failure must remain retryable.' );
-		$assert(
-			25 === (int) get_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_X, true )
-			&& 75 === (int) get_post_meta( $migration_test_post_id, CORSIVO_FOCAL_POINT_META_Y, true ),
-			'A retried legacy migration must preserve both original coordinates.'
-		);
 	} finally {
 		remove_filter( 'update_post_metadata', $blocked_meta_write, 10 );
-		wp_delete_post( $migration_test_post_id, true );
-	}
-}
-
-$attachment_only_post_id = wp_insert_post(
-	array(
-		'post_title'  => 'Corsivo Focal Point attachment-only migration',
-		'post_status' => 'draft',
-		'post_type'   => 'post',
-	),
-	true
-);
-
-if ( ! is_wp_error( $attachment_only_post_id ) && false === get_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, false ) ) {
-	$attachment_only_post_id = absint( $attachment_only_post_id );
-	$previous_data_version   = get_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION, false );
-	$previous_cursor         = get_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, false );
-	$previous_migration      = wp_get_scheduled_event( CORSIVO_FOCAL_POINT_MIGRATION_HOOK );
-
-	try {
-		add_post_meta( $attachment_only_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, 777 );
-		delete_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION );
-		update_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, max( 0, $attachment_only_post_id - 1 ), false );
-		wp_clear_scheduled_hook( CORSIVO_FOCAL_POINT_MIGRATION_HOOK );
-
-		$assert( corsivo_focal_point_process_migration_batch(), 'The attachment-only migration batch must complete.' );
-		$assert(
-			50 === (int) get_post_meta( $attachment_only_post_id, CORSIVO_FOCAL_POINT_META_X, true )
-			&& 50 === (int) get_post_meta( $attachment_only_post_id, CORSIVO_FOCAL_POINT_META_Y, true )
-			&& 777 === (int) get_post_meta( $attachment_only_post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, true ),
-			'Batch migration must normalize attachment-only records.'
-		);
-	} finally {
-		wp_delete_post( $attachment_only_post_id, true );
-		wp_clear_scheduled_hook( CORSIVO_FOCAL_POINT_MIGRATION_HOOK );
-
-		if ( false === $previous_data_version ) {
-			delete_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION );
-		} else {
-			update_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION, $previous_data_version, false );
-		}
-
-		if ( false === $previous_cursor ) {
-			delete_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION );
-		} else {
-			update_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, $previous_cursor, false );
-		}
-
-		if ( $previous_migration ) {
-			if ( $previous_migration->schedule ) {
-				wp_schedule_event( $previous_migration->timestamp, $previous_migration->schedule, CORSIVO_FOCAL_POINT_MIGRATION_HOOK, $previous_migration->args );
-			} else {
-				wp_schedule_single_event( $previous_migration->timestamp, CORSIVO_FOCAL_POINT_MIGRATION_HOOK, $previous_migration->args );
-			}
-		}
-	}
-} elseif ( ! is_wp_error( $attachment_only_post_id ) ) {
-	wp_delete_post( $attachment_only_post_id, true );
-}
-
-if ( false === get_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, false ) ) {
-	$lock_token = corsivo_focal_point_acquire_migration_lock();
-
-	if ( $lock_token ) {
-		$replacement_lock = array(
-			'token' => wp_generate_uuid4(),
-			'time'  => time(),
-		);
-		update_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, $replacement_lock, false );
-		corsivo_focal_point_release_migration_lock( $lock_token );
-		$assert( $replacement_lock === get_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION ), 'A worker must not release a lock owned by another process.' );
-		delete_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION );
+		wp_delete_post( $update_test_post_id, true );
 	}
 }
 

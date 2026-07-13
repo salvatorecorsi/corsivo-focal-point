@@ -12,15 +12,6 @@ function corsivo_focal_point_get_post_types() {
 		$post_types[] = 'product';
 	}
 
-	if ( has_filter( 'focal_point_post_types' ) ) {
-		$post_types = apply_filters_deprecated(
-			'focal_point_post_types',
-			array( $post_types ),
-			'1.1.0',
-			'corsivo_focal_point_post_types'
-		);
-	}
-
 	$post_types = apply_filters( 'corsivo_focal_point_post_types', $post_types );
 	$post_types = corsivo_focal_point_sanitize_post_types( $post_types );
 
@@ -120,19 +111,6 @@ function corsivo_focal_point_get_snapshot_mismatches( $post_id, $snapshot ) {
 	return $failed_meta_keys;
 }
 
-function corsivo_focal_point_reads_legacy_meta() {
-	return CORSIVO_FOCAL_POINT_DATA_VERSION !== get_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION );
-}
-
-function corsivo_focal_point_uses_legacy_position( $post_id ) {
-	if ( ! corsivo_focal_point_reads_legacy_meta() ) {
-		return false;
-	}
-
-	return ( ! metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_X ) && metadata_exists( 'post', $post_id, '_focal_point_x' ) )
-		|| ( ! metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_Y ) && metadata_exists( 'post', $post_id, '_focal_point_y' ) );
-}
-
 function corsivo_focal_point_authorize_meta( $allowed, $meta_key, $post_id, $user_id ) {
 	return $post_id > 0 && user_can( $user_id, 'edit_post', $post_id );
 }
@@ -199,22 +177,8 @@ function corsivo_focal_point_get_stored_state( $post_id ) {
 
 	$has_x = metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_X );
 	$has_y = metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_Y );
-
-	$reads_legacy = corsivo_focal_point_reads_legacy_meta();
-
-	if ( $reads_legacy && ! $has_x && metadata_exists( 'post', $post_id, '_focal_point_x' ) ) {
-		$x     = get_post_meta( $post_id, '_focal_point_x', true );
-		$has_x = true;
-	} else {
-		$x = get_post_meta( $post_id, CORSIVO_FOCAL_POINT_META_X, true );
-	}
-
-	if ( $reads_legacy && ! $has_y && metadata_exists( 'post', $post_id, '_focal_point_y' ) ) {
-		$y     = get_post_meta( $post_id, '_focal_point_y', true );
-		$has_y = true;
-	} else {
-		$y = get_post_meta( $post_id, CORSIVO_FOCAL_POINT_META_Y, true );
-	}
+	$x     = get_post_meta( $post_id, CORSIVO_FOCAL_POINT_META_X, true );
+	$y     = get_post_meta( $post_id, CORSIVO_FOCAL_POINT_META_Y, true );
 
 	$has_attachment_link = metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT );
 
@@ -256,137 +220,6 @@ function corsivo_focal_point_get_position( $post_id = null ) {
 	$position = corsivo_focal_point_get_position_array( $post_id );
 
 	return $position['x'] . '% ' . $position['y'] . '%';
-}
-
-if ( ! function_exists( 'fp_get_position' ) ) {
-	function fp_get_position( $post_id = null ) {
-		return corsivo_focal_point_get_position( $post_id );
-	}
-}
-
-if ( ! function_exists( 'fp_get_position_array' ) ) {
-	function fp_get_position_array( $post_id = null ) {
-		return corsivo_focal_point_get_position_array( $post_id );
-	}
-}
-
-function corsivo_focal_point_migrate_post( $post_id ) {
-	$post_id = absint( $post_id );
-
-	if ( ! $post_id ) {
-		return false;
-	}
-
-	$failed_meta_keys = array();
-
-	$legacy_keys = array(
-		'_focal_point_x' => CORSIVO_FOCAL_POINT_META_X,
-		'_focal_point_y' => CORSIVO_FOCAL_POINT_META_Y,
-	);
-
-	foreach ( $legacy_keys as $legacy_key => $current_key ) {
-		if ( metadata_exists( 'post', $post_id, $current_key ) || ! metadata_exists( 'post', $post_id, $legacy_key ) ) {
-			continue;
-		}
-
-		if ( ! corsivo_focal_point_write_single_meta(
-			$post_id,
-			$current_key,
-			corsivo_focal_point_sanitize_coordinate( get_post_meta( $post_id, $legacy_key, true ) )
-		) ) {
-			$failed_meta_keys[] = $current_key;
-		}
-	}
-
-	if ( $failed_meta_keys ) {
-		corsivo_focal_point_log_failure(
-			'migration_write_failed',
-			array(
-				'post_id'   => $post_id,
-				'meta_keys' => $failed_meta_keys,
-			)
-		);
-
-		return false;
-	}
-
-	foreach ( array( CORSIVO_FOCAL_POINT_META_X, CORSIVO_FOCAL_POINT_META_Y ) as $meta_key ) {
-		if ( metadata_exists( 'post', $post_id, $meta_key ) ) {
-			if ( ! corsivo_focal_point_write_single_meta(
-				$post_id,
-				$meta_key,
-				corsivo_focal_point_sanitize_coordinate( get_post_meta( $post_id, $meta_key, true ) )
-			) ) {
-				$failed_meta_keys[] = $meta_key;
-			}
-		}
-	}
-
-	if ( $failed_meta_keys ) {
-		corsivo_focal_point_log_failure(
-			'migration_write_failed',
-			array(
-				'post_id'   => $post_id,
-				'meta_keys' => $failed_meta_keys,
-			)
-		);
-
-		return false;
-	}
-
-	$has_position = metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_X )
-		|| metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_Y )
-		|| metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT );
-
-	if ( ! $has_position ) {
-		return true;
-	}
-
-	if ( ! metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_X ) ) {
-		if ( ! corsivo_focal_point_write_single_meta( $post_id, CORSIVO_FOCAL_POINT_META_X, 50 ) ) {
-			$failed_meta_keys[] = CORSIVO_FOCAL_POINT_META_X;
-		}
-	}
-
-	if ( ! metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_Y ) ) {
-		if ( ! corsivo_focal_point_write_single_meta( $post_id, CORSIVO_FOCAL_POINT_META_Y, 50 ) ) {
-			$failed_meta_keys[] = CORSIVO_FOCAL_POINT_META_Y;
-		}
-	}
-
-	if ( $failed_meta_keys ) {
-		corsivo_focal_point_log_failure(
-			'migration_write_failed',
-			array(
-				'post_id'   => $post_id,
-				'meta_keys' => $failed_meta_keys,
-			)
-		);
-
-		return false;
-	}
-
-	if ( metadata_exists( 'post', $post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT ) ) {
-		$success = corsivo_focal_point_write_single_meta(
-			$post_id,
-			CORSIVO_FOCAL_POINT_META_ATTACHMENT,
-			corsivo_focal_point_sanitize_attachment_id( get_post_meta( $post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, true ) )
-		);
-	} else {
-		$success = corsivo_focal_point_write_single_meta( $post_id, CORSIVO_FOCAL_POINT_META_ATTACHMENT, get_post_thumbnail_id( $post_id ) );
-	}
-
-	if ( ! $success ) {
-		corsivo_focal_point_log_failure(
-			'migration_write_failed',
-			array(
-				'post_id'   => $post_id,
-				'meta_keys' => array( CORSIVO_FOCAL_POINT_META_ATTACHMENT ),
-			)
-		);
-	}
-
-	return $success;
 }
 
 function corsivo_focal_point_write_single_meta( $post_id, $meta_key, $value ) {
@@ -518,191 +351,12 @@ function corsivo_focal_point_update_position( $post_id, $x, $y, $attachment_id )
 	return false;
 }
 
-function corsivo_focal_point_schedule_migration() {
-	if ( CORSIVO_FOCAL_POINT_DATA_VERSION === get_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION )
-		|| get_option( CORSIVO_FOCAL_POINT_UNINSTALLING_OPTION, false )
-		|| wp_next_scheduled( CORSIVO_FOCAL_POINT_MIGRATION_HOOK )
-	) {
-		return;
-	}
-
-	wp_schedule_single_event( time() + 10, CORSIVO_FOCAL_POINT_MIGRATION_HOOK );
-}
-add_action( 'init', 'corsivo_focal_point_schedule_migration', 100 );
-
-function corsivo_focal_point_acquire_migration_lock() {
-	$lock      = get_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, array() );
-	$lock_time = is_array( $lock ) ? absint( $lock['time'] ?? 0 ) : absint( $lock );
-
-	if ( $lock_time && $lock_time > time() - 900 ) {
-		return false;
-	}
-
-	if ( $lock_time ) {
-		delete_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION );
-
-		if ( false !== get_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, false ) ) {
-			corsivo_focal_point_log_failure( 'migration_stale_lock_delete_failed' );
-			return false;
-		}
-	}
-
-	$token = wp_generate_uuid4();
-	$lock  = array(
-		'token' => $token,
-		'time'  => time(),
-	);
-
-	return add_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, $lock, '', false ) ? $token : false;
-}
-
-function corsivo_focal_point_release_migration_lock( $token ) {
-	$lock = get_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, array() );
-
-	if ( is_array( $lock ) && isset( $lock['token'] ) && hash_equals( (string) $lock['token'], (string) $token ) ) {
-		delete_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION );
-		$remaining_lock = get_option( CORSIVO_FOCAL_POINT_MIGRATION_LOCK_OPTION, array() );
-
-		if ( is_array( $remaining_lock )
-			&& isset( $remaining_lock['token'] )
-			&& hash_equals( (string) $remaining_lock['token'], (string) $token )
-		) {
-			corsivo_focal_point_log_failure( 'migration_lock_release_failed' );
-		}
-	}
-}
-
-function corsivo_focal_point_process_migration_batch() {
-	global $wpdb;
-
-	if ( get_option( CORSIVO_FOCAL_POINT_UNINSTALLING_OPTION, false ) ) {
-		return true;
-	}
-
-	if ( CORSIVO_FOCAL_POINT_DATA_VERSION === get_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION ) ) {
-		wp_clear_scheduled_hook( CORSIVO_FOCAL_POINT_MIGRATION_HOOK );
-		return true;
-	}
-
-	$lock_token = corsivo_focal_point_acquire_migration_lock();
-
-	if ( ! $lock_token ) {
-		return false;
-	}
-
-	try {
-		corsivo_focal_point_initialize_site();
-
-		$cursor       = absint( get_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, 0 ) );
-		$meta_keys    = array( '_focal_point_x', '_focal_point_y', CORSIVO_FOCAL_POINT_META_X, CORSIVO_FOCAL_POINT_META_Y, CORSIVO_FOCAL_POINT_META_ATTACHMENT );
-		$placeholders = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
-		$query        = $wpdb->prepare(
-			"SELECT DISTINCT postmeta.post_id
-			FROM {$wpdb->postmeta} AS postmeta
-			INNER JOIN {$wpdb->posts} AS posts ON posts.ID = postmeta.post_id
-			WHERE postmeta.meta_key IN ({$placeholders})
-				AND postmeta.post_id > %d
-				AND posts.post_type NOT IN ('revision', 'attachment')
-			ORDER BY postmeta.post_id ASC
-			LIMIT 200",
-			...array_merge( $meta_keys, array( $cursor ) )
-		);
-		$post_ids     = array_map( 'absint', $wpdb->get_col( $query ) );
-
-		if ( $wpdb->last_error ) {
-			corsivo_focal_point_log_failure(
-				'migration_query_failed',
-				array( 'database_error' => $wpdb->last_error )
-			);
-			return false;
-		}
-
-		$last_migrated_post_id = $cursor;
-
-		foreach ( $post_ids as $post_id ) {
-			if ( get_option( CORSIVO_FOCAL_POINT_UNINSTALLING_OPTION, false ) || ! corsivo_focal_point_migrate_post( $post_id ) ) {
-				if ( $last_migrated_post_id > $cursor ) {
-					update_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, $last_migrated_post_id, false );
-
-					if ( $last_migrated_post_id !== absint( get_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, 0 ) ) ) {
-						corsivo_focal_point_log_failure(
-							'migration_cursor_write_failed',
-							array( 'post_id' => $last_migrated_post_id )
-						);
-					}
-				}
-
-				return false;
-			}
-
-			$last_migrated_post_id = $post_id;
-		}
-
-		if ( 200 === count( $post_ids ) ) {
-			update_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, $last_migrated_post_id, false );
-
-			if ( $last_migrated_post_id !== absint( get_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, 0 ) ) ) {
-				corsivo_focal_point_log_failure(
-					'migration_cursor_write_failed',
-					array( 'post_id' => $last_migrated_post_id )
-				);
-				return false;
-			}
-
-			return false;
-		}
-
-		delete_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION );
-
-		if ( false !== get_option( CORSIVO_FOCAL_POINT_MIGRATION_CURSOR_OPTION, false ) ) {
-			corsivo_focal_point_log_failure( 'migration_cursor_delete_failed' );
-			return false;
-		}
-
-		if ( get_option( CORSIVO_FOCAL_POINT_UNINSTALLING_OPTION, false ) ) {
-			return false;
-		}
-
-		update_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION, CORSIVO_FOCAL_POINT_DATA_VERSION, false );
-
-		if ( CORSIVO_FOCAL_POINT_DATA_VERSION !== get_option( CORSIVO_FOCAL_POINT_DATA_VERSION_OPTION ) ) {
-			corsivo_focal_point_log_failure( 'migration_version_write_failed' );
-			return false;
-		}
-
-		wp_clear_scheduled_hook( CORSIVO_FOCAL_POINT_MIGRATION_HOOK );
-
-		return true;
-	} finally {
-		corsivo_focal_point_release_migration_lock( $lock_token );
-	}
-}
-
-function corsivo_focal_point_run_scheduled_migration() {
-	if ( ! corsivo_focal_point_process_migration_batch() ) {
-		corsivo_focal_point_schedule_migration();
-	}
-}
-add_action( CORSIVO_FOCAL_POINT_MIGRATION_HOOK, 'corsivo_focal_point_run_scheduled_migration' );
-
-function corsivo_focal_point_maybe_upgrade() {
-	if ( ! current_user_can( 'manage_options' ) ) {
-		return;
-	}
-
-	if ( ! corsivo_focal_point_process_migration_batch() ) {
-		corsivo_focal_point_schedule_migration();
-	}
-}
-add_action( 'admin_init', 'corsivo_focal_point_maybe_upgrade', 5 );
-
 function corsivo_focal_point_mark_revision( $revision_id, $post_id ) {
 	$post_type = get_post_type( $post_id );
 
 	if ( ! wp_is_post_autosave( $revision_id )
 		&& in_array( $post_type, corsivo_focal_point_get_post_types(), true )
 		&& post_type_supports( $post_type, 'revisions' )
-		&& ! corsivo_focal_point_uses_legacy_position( $post_id )
 		&& corsivo_focal_point_revision_has_complete_position( $revision_id )
 		&& corsivo_focal_point_revision_matches_post( $revision_id, $post_id )
 	) {
@@ -759,7 +413,7 @@ function corsivo_focal_point_revision_has_recognized_marker( $revision_id ) {
 		&& 1 === preg_match( '/^' . preg_quote( CORSIVO_FOCAL_POINT_REVISION_SCHEMA_VERSION, '/' ) . ':[a-f0-9]{64}$/D', $marker );
 }
 
-function corsivo_focal_point_revision_is_compatible( $revision_id ) {
+function corsivo_focal_point_revision_is_coherent( $revision_id ) {
 	$markers = corsivo_focal_point_get_raw_meta_values( $revision_id, CORSIVO_FOCAL_POINT_REVISION_MARKER );
 	$marker  = 1 === count( $markers ) ? reset( $markers ) : '';
 
@@ -773,7 +427,7 @@ function corsivo_focal_point_write_revision_marker( $revision_id ) {
 		$revision_id,
 		CORSIVO_FOCAL_POINT_REVISION_MARKER,
 		corsivo_focal_point_revision_marker_value( $revision_id )
-	) && corsivo_focal_point_revision_is_compatible( $revision_id );
+	) && corsivo_focal_point_revision_is_coherent( $revision_id );
 }
 
 function corsivo_focal_point_sync_autosave( $autosave, $is_update = true ) {
@@ -793,7 +447,7 @@ function corsivo_focal_point_sync_autosave( $autosave, $is_update = true ) {
 	$posted_data = $_POST['data']['wp_autosave'] ?? $_POST;
 	$posted_data = is_array( $posted_data ) ? $posted_data : array();
 	$meta_keys   = corsivo_focal_point_position_meta_keys();
-	$was_marked  = corsivo_focal_point_revision_is_compatible( $revision_id );
+	$was_coherent = corsivo_focal_point_revision_is_coherent( $revision_id );
 	$has_updates = (bool) array_intersect( $meta_keys, array_keys( $posted_data ) );
 	$complete    = true;
 
@@ -836,7 +490,7 @@ function corsivo_focal_point_sync_autosave( $autosave, $is_update = true ) {
 		}
 	}
 
-	if ( $is_update && ! $was_marked && ! $has_updates ) {
+	if ( $is_update && ! $was_coherent && ! $has_updates ) {
 		$complete = corsivo_focal_point_revision_matches_post( $revision_id, $post_id ) && $complete;
 	}
 
@@ -954,8 +608,8 @@ function corsivo_focal_point_mark_rest_autosave( $response, $autosave, $request 
 	$meta             = is_array( $meta ) ? $meta : array();
 	$meta_keys        = corsivo_focal_point_position_meta_keys();
 	$submitted_keys   = array_values( array_intersect( $meta_keys, array_keys( $meta ) ) );
-	$was_compatible   = corsivo_focal_point_revision_is_compatible( $autosave->ID );
-	$can_reuse_state  = $was_compatible
+	$was_coherent     = corsivo_focal_point_revision_is_coherent( $autosave->ID );
+	$can_reuse_state  = $was_coherent
 		|| ( corsivo_focal_point_revision_has_recognized_marker( $autosave->ID ) && corsivo_focal_point_revision_has_complete_position( $autosave->ID ) );
 	$parent_state     = corsivo_focal_point_get_stored_state( $post_id );
 	$autosave_state   = corsivo_focal_point_get_stored_state( $autosave->ID );
@@ -988,12 +642,12 @@ function corsivo_focal_point_mark_rest_autosave( $response, $autosave, $request 
 		}
 
 		$position_written = corsivo_focal_point_update_position( $autosave->ID, $x, $y, $attachment_id );
-	} elseif ( ! $was_compatible && ( $parent_state['has_position'] || $parent_state['has_attachment_link'] ) ) {
+	} elseif ( ! $was_coherent && ( $parent_state['has_position'] || $parent_state['has_attachment_link'] ) ) {
 		$attachment_id    = $parent_state['has_attachment_link']
 			? $parent_state['attachment_id']
 			: get_post_thumbnail_id( $post_id );
 		$position_written = corsivo_focal_point_update_position( $autosave->ID, $parent_state['x'], $parent_state['y'], $attachment_id );
-	} elseif ( ! $was_compatible ) {
+	} elseif ( ! $was_coherent ) {
 		foreach ( $meta_keys as $meta_key ) {
 			delete_metadata( 'post', $autosave->ID, $meta_key );
 			$position_written = ! metadata_exists( 'post', $autosave->ID, $meta_key ) && $position_written;
@@ -1062,11 +716,11 @@ function corsivo_focal_point_capture_revision_restore( $post_id, $revision_id ) 
 	corsivo_focal_point_revision_restore_snapshot(
 		$post_id,
 		array(
-			'previous_state'   => corsivo_focal_point_get_stored_state( $post_id ),
-			'preserve'         => ! corsivo_focal_point_revision_is_compatible( $revision_id ),
-			'restore_manually' => wp_is_post_autosave( $revision_id ) && ! post_type_supports( $post_type, 'revisions' ),
-			'revision_id'      => $revision_id,
-			'values'           => $values,
+			'previous_state'     => corsivo_focal_point_get_stored_state( $post_id ),
+			'previous_values'    => $values,
+			'revision_coherent' => corsivo_focal_point_revision_is_coherent( $revision_id ),
+			'restore_manually'   => wp_is_post_autosave( $revision_id ) && ! post_type_supports( $post_type, 'revisions' ),
+			'revision_id'        => $revision_id,
 		)
 	);
 }
@@ -1083,9 +737,9 @@ function corsivo_focal_point_finalize_revision_restore( $post_id ) {
 	$restore_succeeded = true;
 	$failed_meta_keys  = array();
 
-	if ( $snapshot['preserve'] ) {
-		$restore_mode      = 'preserve';
-		$failed_meta_keys  = corsivo_focal_point_restore_meta_snapshot( $post_id, $snapshot['values'] );
+	if ( ! $snapshot['revision_coherent'] ) {
+		$restore_mode      = 'rejected';
+		$failed_meta_keys  = corsivo_focal_point_restore_meta_snapshot( $post_id, $snapshot['previous_values'] );
 		$restore_succeeded = ! $failed_meta_keys;
 	} elseif ( $snapshot['restore_manually'] ) {
 		$restore_mode   = 'manual';
@@ -1156,9 +810,9 @@ add_filter( '_wp_post_revision_fields', 'corsivo_focal_point_add_revision_field'
 
 function corsivo_focal_point_get_revision_field( $revision_field, $field, $revision ) {
 	if ( wp_is_post_revision( $revision->ID )
-		&& ! corsivo_focal_point_revision_is_compatible( $revision->ID )
+		&& ! corsivo_focal_point_revision_is_coherent( $revision->ID )
 	) {
-		return __( 'Storico focal point non disponibile; il valore corrente verrà mantenuto', 'corsivo-focal-point' );
+		return __( 'Snapshot focal point non valido', 'corsivo-focal-point' );
 	}
 
 	$state = corsivo_focal_point_get_stored_state( $revision->ID );
